@@ -27,7 +27,7 @@ jobs:
         uses: bazel-contrib/setup-bazel@0.15.0
         if: ${{matrix.os != 'windows-latest'}}
         with:
-          token: ${{ secrets.GH_TOKEN }}
+          token: ${{ secrets.GH_TOKEN || ''  }}
           bazelisk-version: 1.x
           # Avoid downloading Bazel every time.
           bazelisk-cache: false
@@ -43,7 +43,7 @@ jobs:
         if: ${{matrix.os == 'windows-latest'}}
         uses: bazel-contrib/setup-bazel@0.15.0
         with: 
-          token: ${{ secrets.GH_TOKEN }}
+          token: ${{ secrets.GH_TOKEN || '' }}
           bazelisk-version: 1.x
           bazelisk-cache: false
           repository-cache: false
@@ -72,7 +72,7 @@ jobs:
         uses: bazel-contrib/setup-bazel@0.15.0
         if: ${{matrix.os != 'windows-latest'}}
         with:
-          token: ${{ secrets.GH_TOKEN }}
+          token: ${{ secrets.GH_TOKEN || '' }}
           bazelisk-version: 1.x
           bazelisk-cache: false
           repository-cache: false
@@ -84,7 +84,7 @@ jobs:
         if: ${{matrix.os == 'windows-latest'}}
         uses: bazel-contrib/setup-bazel@0.15.0
         with: 
-          token: ${{ secrets.GH_TOKEN }}
+          token: ${{ secrets.GH_TOKEN || '' }}
           bazelisk-version: 1.x
           bazelisk-cache: false
           repository-cache: false
