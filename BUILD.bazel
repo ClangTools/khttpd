@@ -1,0 +1,5 @@
+alias(
+    name = "khttpd",
+    actual = "//framework:framework",
+    visibility = ["//visibility:public"],
+)

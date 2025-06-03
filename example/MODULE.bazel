@@ -1,0 +1,14 @@
+module(name = "khttpd-boost-starter")
+
+bazel_dep(name = "platforms", version = "0.0.11")
+bazel_dep(name = "rules_cc", version = "0.1.1")
+bazel_dep(name = "boost.asio", version = "1.87.0.bcr.1")
+bazel_dep(name = "boost.mysql", version = "1.87.0")
+bazel_dep(name = "khttpd", version = "0.1.0")
+local_path_override(
+    module_name = "khttpd",
+    path = "..",
+)
+
+cc_configure = use_extension("@rules_cc//cc:extensions.bzl", "cc_configure_extension")
+use_repo(cc_configure, "local_config_cc")

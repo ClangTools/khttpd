@@ -1,0 +1,11 @@
+cc_binary(
+    name = "app",
+    srcs = [
+        "HelloController.hpp",
+        "HelloWsController.hpp",
+        "main.cpp",
+    ],
+    deps = [
+        "@khttpd",
+    ],
+)

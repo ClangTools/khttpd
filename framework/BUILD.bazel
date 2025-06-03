@@ -1,0 +1,36 @@
+# framework/BUILD.bazel
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+cc_library(
+    name = "framework",
+    srcs = glob([
+        "*.cpp",
+        "router/*.cpp",
+        "session/*.cpp",
+        "websocket/*.cpp",
+        "context/*.cpp",
+    ]),
+    hdrs = glob([
+        "*.hpp",
+        "context/*.hpp",
+        "controller/*.hpp",
+        "router/*.hpp",
+        "session/*.hpp",
+        "websocket/*.hpp",
+    ]),
+    copts = [
+        "-std=c++17",
+        "-Wall",
+        "-pedantic",
+    ],
+    includes = ["."],
+    strip_include_prefix = "",  # 确保头文件路径正确，例如 #include "context/http_context.hpp"
+    visibility = ["//visibility:public"],
+    deps = [
+        "@boost.asio",
+        "@boost.beast",
+        "@boost.json",
+        "@boost.url",
+        "@fmt",  # 用于日志输出
+    ],
+)
