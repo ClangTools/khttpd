@@ -12,7 +12,7 @@
    >   name = "khttpd",
    >   integrity = "sha256-xNVqLJWKZOaQk5cqht35l/6siz4yUrXvyRRHei0EYmU=",
    >   strip_prefix = "0.1.0",
-   >   url = "https://github.com/kekxv/khttpd-next/archive/refs/tags/0.1.0.tar.gz",
+   >   url = "https://github.com/ClangTools/khttpd/archive/refs/tags/0.1.0.tar.gz",
    > )
    > ```
 3. create `BUILD.bazel`,like [BUILD.bazel](example/BUILD.bazel)
