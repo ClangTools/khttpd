@@ -10,9 +10,12 @@
    > bazel_dep(name = "rules_cc", version = "0.1.1")
    > http_archive(
    >   name = "khttpd",
-   >   integrity = "sha256-Mi8LRIL8DZ+gu0aBNIQfCNjFVMVP9aopoTp6JL9+HrU=",
-   >   strip_prefix = "arm-gnu-toolchain-13.3.rel1-x86_64-aarch64-none-linux-gnu",
-   >   type = "tar.xz",
-   >   url = "https://developer.arm.com/-/media/Files/downloads/gnu/13.3.rel1/binrel/arm-gnu-toolchain-13.3.rel1-x86_64-aarch64-none-linux-gnu.tar.xz",
+   >   integrity = "sha256-xNVqLJWKZOaQk5cqht35l/6siz4yUrXvyRRHei0EYmU=",
+   >   strip_prefix = "0.1.0",
+   >   url = "https://github.com/kekxv/khttpd-next/archive/refs/tags/0.1.0.tar.gz",
    > )
    > ```
+3. create `BUILD.bazel`,like [BUILD.bazel](example/BUILD.bazel)
+4. create you code like [example](example)
+5. run `bazel build //:your_target_name` to compile
+6. run `bazel run //:your_target_name` to execute
