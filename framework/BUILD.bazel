@@ -14,6 +14,7 @@ cc_library(
         "*.hpp",
         "context/*.hpp",
         "controller/*.hpp",
+        "di/*.hpp",
         "router/*.hpp",
         "session/*.hpp",
         "websocket/*.hpp",
@@ -29,6 +30,7 @@ cc_library(
     deps = [
         "@boost.asio",
         "@boost.beast",
+        "@boost.filesystem",
         "@boost.json",
         "@boost.url",
         "@fmt",  # 用于日志输出

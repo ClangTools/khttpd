@@ -1,4 +1,5 @@
 /bazel-*
+/example/bazel-*
 .DS_Store
 node_modules
 *.log
@@ -7,3 +8,4 @@ node_modules
 /.clwb/targets/
 /.clwb/aspects/
 .clwb
+web_root
