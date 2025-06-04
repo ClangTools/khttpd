@@ -27,3 +27,18 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_test(
+    name = "di_container_test",
+    srcs = ["di_container_test.cpp"],
+    copts = [
+        "-std=c++17",
+        "-Wall",
+        "-pedantic",
+    ],
+    deps = [
+        "//framework",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)

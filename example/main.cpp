@@ -1,15 +1,12 @@
 // app/main.cpp
+#include <boost/filesystem.hpp>
+#include <fstream>
 #include "framework/server.hpp"
 #include "framework/context/http_context.hpp"
 #include "framework/context/websocket_context.hpp"
-
 #include <boost/asio/ip/tcp.hpp>
-#include <fmt/core.h>
-#include <iostream>
 #include <thread>
 #include <memory>
-#include <string_view>
-
 #include "HelloController.hpp"
 #include "HelloWsController.hpp"
 
@@ -21,12 +18,21 @@ int main(int argc, char* argv[])
 {
   auto const address = net::ip::make_address("0.0.0.0");
   auto const port = static_cast<unsigned short>(8080);
-  auto const num_threads = std::max<int>(1, std::thread::hardware_concurrency());
+  auto const num_threads = std::max<int>(1, static_cast<int>(std::thread::hardware_concurrency()));
 
   fmt::print("Starting khttpd server with {} worker threads...\n", num_threads);
 
+  // 定义 Web 根目录
+  std::string web_root_path = "web_root";
+  // 创建一个简单的 web_root 目录和文件用于测试
+  boost::filesystem::create_directories(web_root_path);
+  std::ofstream("web_root/index.html") <<
+    "<html><body><h1>Hello from Static Index!</h1><p>Visit <a href=\"/hello_static.html\">hello_static.html</a></p></body></html>";
+  std::ofstream("web_root/hello_static.html") <<
+    R"(<html><body><h2>This is a static HTML file.</h2><img src="/image.png" alt="Static Image"/></body></html>)";
+
   auto server = std::make_shared<khttpd::framework::Server>(
-    tcp::endpoint{address, port}, num_threads);
+    tcp::endpoint{address, port}, web_root_path, num_threads);
 
   auto& http_router = server->get_http_router();
   auto& ws_router = server->get_websocket_router();
@@ -39,7 +45,7 @@ int main(int argc, char* argv[])
     ctx.set_status(beast::http::status::ok);
     ctx.set_content_type("text/html");
     ctx.set_body(
-      "<h1>Hello from khttpd!</h1><p>Try <a href=\"/hello?name=World\">/hello?name=World</a> or <a href=\"/info\">/info</a></p><p>Dynamic paths: <a href=\"/users/123\">/users/123</a>, <a href=\"/users/profile\">/users/profile</a>, <a href=\"/items/book/id/456\">/items/book/id/456</a>, <a href=\"/files/a/b/c.txt\">/files/a/b/c.txt</a></p><p>POST examples: /api/json, /api/form, /api/upload</p><p>Or connect to <a href=\"/ws\">WebSocket</a></p><p>Or connect to <a href=\"/chat\">WebSocket Chat</a></p>");
+      R"(<h1>Hello from khttpd!</h1><p>Try <a href="/hello?name=World">/hello?name=World</a> or <a href="/info">/info</a></p><p>Dynamic paths: <a href="/users/123">/users/123</a>, <a href="/users/profile">/users/profile</a>, <a href="/items/book/id/456">/items/book/id/456</a>, <a href="/files/a/b/c.txt">/files/a/b/c.txt</a></p><p>POST examples: /api/json, /api/form, /api/upload</p><p>Or connect to <a href="/ws">WebSocket</a></p><p>Or connect to <a href="/chat">WebSocket Chat</a></p>)");
   });
 
   http_router.get("/hello", [](khttpd::framework::HttpContext& ctx)

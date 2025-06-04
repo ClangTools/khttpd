@@ -23,7 +23,7 @@ namespace khttpd::framework
   {
   public:
     // 构造函数：现在只接受端口和线程数量。路由器在内部创建。
-    Server(const tcp::endpoint& endpoint, int num_threads = 1);
+    Server(const tcp::endpoint& endpoint, std::string  web_root, int num_threads = 1);
 
     HttpRouter& get_http_router();
     const HttpRouter& get_http_router() const; // const 版本
@@ -40,6 +40,7 @@ namespace khttpd::framework
     int num_threads_;
     std::vector<std::thread> threads_;
     net::signal_set signals_;
+    const std::string web_root_;
 
     tcp::acceptor acceptor_;
 

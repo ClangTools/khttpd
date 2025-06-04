@@ -2,14 +2,16 @@
 #include "server.hpp"
 #include "session/http_session.hpp" // 需要HttpSession
 #include <fmt/core.h>
-
+#include <boost/filesystem.hpp>
+#include <utility>
 
 namespace khttpd::framework
 {
-  Server::Server(const tcp::endpoint& endpoint, int num_threads)
+  Server::Server(const tcp::endpoint& endpoint, std::string  web_root, int num_threads)
     : ioc_(std::in_place, num_threads),
       num_threads_(num_threads),
       signals_(*ioc_, SIGINT, SIGTERM),
+      web_root_(std::move(web_root)),
       acceptor_(net::make_strand(*ioc_))
   {
     boost::beast::error_code ec;
@@ -42,6 +44,17 @@ namespace khttpd::framework
       throw std::runtime_error(fmt::format("Failed to listen: {}", ec.message()));
     }
 
+    // 检查 web_root 路径
+    if (!boost::filesystem::exists(web_root_, ec))
+    {
+      fmt::print(stderr, "Warning: Web root directory '{}' does not exist. Static file serving may fail. Error: {}\n",
+                 web_root_, ec.message());
+    }
+    else if (!boost::filesystem::is_directory(web_root_, ec))
+    {
+      fmt::print(stderr, "Warning: Web root path '{}' is not a directory. Static file serving may fail. Error: {}\n",
+                 web_root_, ec.message());
+    }
   }
 
   HttpRouter& Server::get_http_router()
@@ -125,7 +138,7 @@ namespace khttpd::framework
     }
     else
     {
-      std::make_shared<HttpSession>(std::move(socket), http_router_, websocket_router_)->run();
+      std::make_shared<HttpSession>(std::move(socket), http_router_, websocket_router_, web_root_)->run();
     }
 
     if (acceptor_.is_open())
