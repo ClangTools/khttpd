@@ -49,7 +49,7 @@ namespace khttpd::framework
     void del(const std::string& path, HttpHandler handler);
     void options(const std::string& path, HttpHandler handler);
 
-    void dispatch(HttpContext& ctx);
+    bool dispatch(HttpContext& ctx);
 
   private:
     std::vector<RouteEntry> routes_;
