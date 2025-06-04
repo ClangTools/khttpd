@@ -8,11 +8,27 @@
    > http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
    > bazel_dep(name = "platforms", version = "0.0.11")
    > bazel_dep(name = "rules_cc", version = "0.1.1")
+   > 
+   > bazel_dep(name = "fmt", version = "11.0.2")
+   > bazel_dep(name = "googletest", version = "1.17.0")
+   > bazel_dep(name = "sqlite3", version = "3.49.1")
+   > bazel_dep(name = "boringssl", version = "0.20250415.0")
+   > bazel_dep(name = "boost.array", version = "1.87.0")
+   > bazel_dep(name = "boost.filesystem", version = "1.87.0")
+   > bazel_dep(name = "boost.container", version = "1.87.0.bcr.2")
+   > bazel_dep(name = "boost.asio", version = "1.87.0.bcr.1")
+   > bazel_dep(name = "boost.url", version = "1.87.0")
+   > bazel_dep(name = "boost.thread", version = "1.87.0")
+   > bazel_dep(name = "boost.json", version = "1.87.0")
+   > bazel_dep(name = "boost.beast", version = "1.87.0.bcr.1")
+   > bazel_dep(name = "boost.mysql", version = "1.87.0")
+   > bazel_dep(name = "boost.program_options", version = "1.87.0")
+   > 
    > http_archive(
    >   name = "khttpd",
-   >   integrity = "sha256-xNVqLJWKZOaQk5cqht35l/6siz4yUrXvyRRHei0EYmU=",
-   >   strip_prefix = "0.1.0",
-   >   url = "https://github.com/ClangTools/khttpd/archive/refs/tags/0.1.0.tar.gz",
+   >   integrity = "sha256-xrIHeqD3rtrxomQsHd0iWc4eKvlpjyOjW5dWOi/tEYc=",
+   >   strip_prefix = "khttpd-0.0.1",
+   >   url = "https://github.com/ClangTools/khttpd/archive/refs/tags/v0.0.1.tar.gz",
    > )
    > ```
 3. create `BUILD.bazel`,like [BUILD.bazel](example/BUILD.bazel)
