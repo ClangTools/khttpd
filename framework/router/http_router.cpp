@@ -149,18 +149,16 @@ namespace khttpd::framework
     add_route(path, boost::beast::http::verb::options, std::move(handler));
   }
 
-  void HttpRouter::dispatch(HttpContext& ctx)
+  bool HttpRouter::dispatch(HttpContext& ctx)
   {
-    std::string request_path = ctx.path();
-    boost::beast::http::verb request_method = ctx.method();
+    const std::string request_path = ctx.path();
+    const boost::beast::http::verb request_method = ctx.method();
 
     for (const auto& entry : routes_)
     {
-      std::smatch matches;
-      if (std::regex_match(request_path, matches, entry.path_regex))
+      if (std::smatch matches; std::regex_match(request_path, matches, entry.path_regex))
       {
-        auto method_it = entry.handlers.find(request_method);
-        if (method_it != entry.handlers.end())
+        if (const auto method_it = entry.handlers.find(request_method); method_it != entry.handlers.end())
         {
           std::map<std::string, std::string> path_params;
           for (size_t i = 0; i < entry.param_names.size(); ++i)
@@ -173,17 +171,18 @@ namespace khttpd::framework
           ctx.set_path_params(std::move(path_params));
 
           method_it->second(ctx);
-          return;
+          return true;
         }
-        else
+        if (request_method != boost::beast::http::verb::get && request_method != boost::beast::http::verb::head)
         {
           handle_method_not_allowed(ctx, entry.handlers); // 传递允许的方法映射
-          return;
+          return true;
         }
       }
     }
 
     handle_not_found(ctx);
+    return false;
   }
 
   void HttpRouter::handle_not_found(HttpContext& ctx)
