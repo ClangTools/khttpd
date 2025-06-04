@@ -80,6 +80,15 @@ void HttpSession::on_read(beast::error_code ec, std::size_t bytes_transferred)
 
 void HttpSession::handle_request()
 {
+  // 处理 GET 请求以尝试服务静态文件
+  if (req_.method() == http::verb::get || req_.method() == http::verb::head)
+  {
+    if (do_serve_static_file())
+    {
+      return; // 静态文件已处理，无需进一步路由
+    }
+  }
+
   res_ = {};
 
   HttpContext ctx(req_, res_);
