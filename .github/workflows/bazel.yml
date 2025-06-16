@@ -81,6 +81,7 @@ jobs:
           bazelrc: |
             build --cxxopt='/std:c++17'
             build --cxxopt='/utf-8'
+            build --features=static_link_msvcrt
             build --@boost.mysql//:ssl=boringssl
             build --@boost.asio//:ssl=boringssl
       - name: Bazel Build example
