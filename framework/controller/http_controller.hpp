@@ -4,6 +4,7 @@
 #include <fmt/format.h>
 
 #include "context/http_context.hpp"
+#include "router/websocket_router.hpp"
 #include "router/http_router.hpp"
 
 
