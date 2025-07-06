@@ -33,6 +33,7 @@ cc_library(
         "@boost.filesystem",
         "@boost.json",
         "@boost.url",
+        "@boost.uuid",
         "@fmt",  # 用于日志输出
     ],
 )

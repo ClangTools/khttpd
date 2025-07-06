@@ -18,6 +18,7 @@ namespace khttpd::framework
   class WebsocketContext
   {
   public:
+    std::string id;
     std::weak_ptr<WebsocketSession> session_weak_ptr;
     std::string message;
     bool is_text;

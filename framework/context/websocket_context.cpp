@@ -12,6 +12,10 @@ namespace khttpd::framework
     : session_weak_ptr(std::move(session)), message(std::move(msg)), is_text(text), path(std::move(path_str)),
       session_(std::move(session))
   {
+    if (const auto session_shared_ptr = session_weak_ptr.lock())
+    {
+      id = session_shared_ptr->id;
+    }
   }
 
   WebsocketContext::WebsocketContext(std::weak_ptr<WebsocketSession> session, std::string path_str,
