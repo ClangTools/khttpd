@@ -7,8 +7,8 @@
 #include <boost/asio/ip/tcp.hpp>
 #include <memory>
 #include <string>
-
-#include "router/websocket_router.hpp" // 需要 WebsocketRouter 的完整定义
+#include <boost/uuid/uuid_generators.hpp>   // boost::uuids::random_generator
+#include "router/websocket_router.hpp"
 
 namespace beast = boost::beast;
 namespace http = beast::http;
@@ -29,11 +29,21 @@ namespace khttpd::framework
 
     virtual void send_message(const std::string& msg, bool is_text);
 
+    static bool send_message(const std::string& id, const std::string& msg, bool is_text);
+    static size_t send_message(const std::vector<std::string>& ids, const std::string& msg, bool is_text);
+
+  public:
+    std::string id;
+
   private:
     ws::stream<beast::tcp_stream> ws_;
     beast::flat_buffer buffer_;
     WebsocketRouter& websocket_router_;
     std::string initial_path_;
+    static std::mutex m_gen_mutex;
+    static boost::uuids::random_generator gen;
+    static std::mutex m_sessions_mutex;
+    static std::map<std::string,std::shared_ptr<WebsocketSession>> m_sessions_id_;
 
     void on_handshake(beast::error_code ec);
     void do_read();
