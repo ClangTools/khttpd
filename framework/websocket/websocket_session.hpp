@@ -43,7 +43,13 @@ namespace khttpd::framework
     static std::mutex m_gen_mutex;
     static boost::uuids::random_generator gen;
     static std::mutex m_sessions_mutex;
-    static std::map<std::string,std::shared_ptr<WebsocketSession>> m_sessions_id_;
+    static std::map<std::string, std::shared_ptr<WebsocketSession>> m_sessions_id_;
+
+    // --- 新增常量 ---
+    // 定义分片大小，例如 16KB。这是一个可以调整的参数。
+    static constexpr size_t const fragment_size_ = 16 * 1024;
+    // 定义一个阈值，小于这个大小的消息不进行分片，直接发送。
+    static constexpr size_t const auto_fragment_threshold_ = fragment_size_ * 2;
 
     void on_handshake(beast::error_code ec);
     void do_read();
