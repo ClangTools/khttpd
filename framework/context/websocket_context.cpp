@@ -22,6 +22,10 @@ namespace khttpd::framework
                                      boost::beast::error_code ec)
     : session_weak_ptr(std::move(session)), is_text(false), error_code(ec), path(std::move(path_str))
   {
+    if (const auto session_shared_ptr = session_weak_ptr.lock())
+    {
+      id = session_shared_ptr->id;
+    }
   }
 
 
