@@ -14,16 +14,16 @@
 #include "router/http_router.hpp"
 #include "router/websocket_router.hpp"
 
-namespace net = boost::asio;
-using tcp = boost::asio::ip::tcp;
-
 namespace khttpd::framework
 {
+  namespace net = boost::asio;
+  using tcp = boost::asio::ip::tcp;
+
   class Server : public std::enable_shared_from_this<Server>
   {
   public:
     // 构造函数：现在只接受端口和线程数量。路由器在内部创建。
-    Server(const tcp::endpoint& endpoint, std::string  web_root, int num_threads = 1);
+    Server(const tcp::endpoint& endpoint, std::string web_root, int num_threads = 1);
 
     HttpRouter& get_http_router();
     const HttpRouter& get_http_router() const; // const 版本

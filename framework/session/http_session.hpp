@@ -8,13 +8,13 @@
 #include "router/http_router.hpp"
 #include "websocket/websocket_session.hpp"
 
-namespace beast = boost::beast;
-namespace http = beast::http;
-namespace net = boost::asio;
-using tcp = boost::asio::ip::tcp;
 
 namespace khttpd::framework
 {
+  namespace beast = boost::beast;
+  namespace http = beast::http;
+  namespace net = boost::asio;
+  using tcp = boost::asio::ip::tcp;
   class HttpRouter;
   class WebsocketRouter;
   class WebsocketSession;

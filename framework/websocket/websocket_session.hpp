@@ -7,17 +7,17 @@
 #include <boost/asio/ip/tcp.hpp>
 #include <memory>
 #include <string>
-#include <boost/uuid/uuid_generators.hpp>   // boost::uuids::random_generator
+#include <boost/uuid/uuid_generators.hpp>
 #include "router/websocket_router.hpp"
-
-namespace beast = boost::beast;
-namespace http = beast::http;
-namespace ws = beast::websocket;
-namespace net = boost::asio;
-using tcp = boost::asio::ip::tcp;
 
 namespace khttpd::framework
 {
+  namespace beast = boost::beast;
+  namespace http = beast::http;
+  namespace ws = beast::websocket;
+  namespace net = boost::asio;
+  using tcp = boost::asio::ip::tcp;
+
   class WebsocketSession : public std::enable_shared_from_this<WebsocketSession>
   {
   public:

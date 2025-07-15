@@ -5,16 +5,9 @@
 #include <memory>
 #include <boost/beast/core/error.hpp>
 
-namespace khttpd
-{
-  namespace framework
-  {
-    class WebsocketSession;
-  }
-}
-
 namespace khttpd::framework
 {
+  class WebsocketSession;
   class WebsocketContext
   {
   public:

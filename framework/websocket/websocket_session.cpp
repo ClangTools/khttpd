@@ -2,7 +2,7 @@
 #include "websocket_session.hpp"
 #include "context/websocket_context.hpp"
 #include <fmt/core.h>
-#include <boost/uuid/uuid_io.hpp>           // to_string
+#include <boost/uuid/uuid_io.hpp>
 
 namespace khttpd::framework
 {
