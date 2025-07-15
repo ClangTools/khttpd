@@ -9,6 +9,12 @@
 
 namespace khttpd::framework
 {
+  namespace websocket
+  {
+    static bool send_message(const std::string& id, const std::string& msg, bool is_text);
+    static size_t send_message(const std::vector<std::string>& ids, const std::string& msg, bool is_text);
+  }
+
   using WebsocketOpenHandler = std::function<void(WebsocketContext&)>;
   using WebsocketMessageHandler = std::function<void(WebsocketContext&)>;
   using WebsocketCloseHandler = std::function<void(WebsocketContext&)>;

@@ -1,9 +1,20 @@
 // framework/router/websocket_router.cpp
 #include "websocket_router.hpp"
 #include <fmt/core.h>
+#include "websocket/websocket_session.hpp"
 
 namespace khttpd::framework
 {
+  bool websocket::send_message(const std::string& id, const std::string& msg, const bool is_text)
+  {
+    return khttpd::framework::WebsocketSession::send_message(id, msg, is_text);
+  }
+
+  size_t websocket::send_message(const std::vector<std::string>& ids, const std::string& msg, const bool is_text)
+  {
+    return khttpd::framework::WebsocketSession::send_message(ids, msg, is_text);
+  }
+
   WebsocketRouter::WebsocketRouter() = default;
 
   void WebsocketRouter::add_handler(const std::string& path,
