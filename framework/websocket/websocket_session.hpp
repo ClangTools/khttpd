@@ -3,7 +3,6 @@
 #define KHTTPD_FRAMEWORK_WEBSOCKET_SESSION_HPP
 
 #include <boost/beast.hpp>
-#include <boost/beast/websocket.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <memory>
 #include <string>
