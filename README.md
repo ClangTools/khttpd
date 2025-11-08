@@ -13,17 +13,9 @@
    > bazel_dep(name = "googletest", version = "1.17.0")
    > bazel_dep(name = "sqlite3", version = "3.49.1")
    > bazel_dep(name = "boringssl", version = "0.20250415.0")
-   > bazel_dep(name = "boost.array", version = "1.87.0")
-   > bazel_dep(name = "boost.filesystem", version = "1.87.0")
-   > bazel_dep(name = "boost.container", version = "1.87.0.bcr.2")
-   > bazel_dep(name = "boost.asio", version = "1.87.0.bcr.1")
-   > bazel_dep(name = "boost.url", version = "1.87.0")
-   > bazel_dep(name = "boost.thread", version = "1.87.0")
-   > bazel_dep(name = "boost.json", version = "1.87.0")
-   > bazel_dep(name = "boost.beast", version = "1.87.0.bcr.1")
-   > bazel_dep(name = "boost.mysql", version = "1.87.0")
-   > bazel_dep(name = "boost.program_options", version = "1.87.0")
-   > 
+   > bazel_dep(name = "boost", version = "1.88.0.bcr.2")
+   > bazel_dep(name = "boost.asio", version = "1.88.0.bcr.2")
+   > bazel_dep(name = "boost.mysql", version = "1.88.0.bcr.2")
    > http_archive(
    >   name = "khttpd",
    >   integrity = "sha256-xrIHeqD3rtrxomQsHd0iWc4eKvlpjyOjW5dWOi/tEYc=",
