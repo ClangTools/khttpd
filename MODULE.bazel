@@ -31,7 +31,6 @@ bazel_dep(name = "boost.url", version = "1.87.0")
 bazel_dep(name = "boost.thread", version = "1.87.0")
 bazel_dep(name = "boost.json", version = "1.87.0")
 bazel_dep(name = "boost.beast", version = "1.87.0.bcr.1")
-bazel_dep(name = "boost.mysql", version = "1.88.0")
 bazel_dep(name = "boost.program_options", version = "1.87.0")
 
 cc_configure = use_extension("@rules_cc//cc:extensions.bzl", "cc_configure_extension")

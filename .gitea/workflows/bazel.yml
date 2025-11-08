@@ -37,7 +37,7 @@ jobs:
           repository-cache: false
           bazelrc: |
             build --cxxopt='-std=c++17'
-            build --@boost.mysql//:ssl=boringssl
+            #build --@boost.mysql//:ssl=boringssl
             build --@boost.asio//:ssl=boringssl
       - name: Install Bazel(WINDOWS)
         if: ${{matrix.os == 'windows-latest'}}
@@ -52,7 +52,7 @@ jobs:
             build --cxxopt='/utf-8'
             build --cxxopt='/wd5031'
             build --features=static_link_msvcrt
-            build --@boost.mysql//:ssl=boringssl
+            #build --@boost.mysql//:ssl=boringssl
             build --@boost.asio//:ssl=boringssl
 
       - name: Bazel Test
@@ -79,7 +79,7 @@ jobs:
           repository-cache: false
           bazelrc: |
             build --cxxopt='-std=c++17'
-            build --@boost.mysql//:ssl=boringssl
+            #build --@boost.mysql//:ssl=boringssl
             build --@boost.asio//:ssl=boringssl
       - name: Install Bazel(WINDOWS)
         if: ${{matrix.os == 'windows-latest'}}
@@ -95,7 +95,7 @@ jobs:
             build --cxxopt='/wd5031'
             build --cxxopt='/wd4668'
             build --cxxopt='/wd4820'
-            build --@boost.mysql//:ssl=boringssl
+            #build --@boost.mysql//:ssl=boringssl
             build --@boost.asio//:ssl=boringssl
       - name: Bazel Build example
         run: |
