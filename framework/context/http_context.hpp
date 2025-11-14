@@ -5,13 +5,11 @@
 #include <boost/beast/http/string_body.hpp>
 #include <boost/beast/http/status.hpp>
 #include <boost/url/url_view.hpp>
-#include <boost/url/parse.hpp>
 #include <boost/json.hpp>
 #include <string>
 #include <map>
 #include <optional>
 #include <vector>
-#include <regex>
 
 namespace khttpd::framework
 {
@@ -46,12 +44,14 @@ namespace khttpd::framework
     const std::vector<MultipartFile>* get_uploaded_files(const std::string& field_name) const;
 
 
-    void set_status(boost::beast::http::status status);
-    void set_body(std::string body);
-    void set_header(boost::beast::string_view name, boost::beast::string_view value);
-    void set_header(boost::beast::http::field name, boost::beast::string_view value);
-    void set_content_type(boost::beast::string_view type);
+    void set_status(boost::beast::http::status status) const;
+    void set_body(std::string body) const;
+    void set_header(boost::beast::string_view name, boost::beast::string_view value) const;
+    void set_header(boost::beast::http::field name, boost::beast::string_view value) const;
+    void set_content_type(boost::beast::string_view type) const;
 
+    Request& get_request() const { return req_; }
+    Response& get_response() const { return res_; }
     Request& get_request() { return req_; }
     Response& get_response() { return res_; }
 
@@ -79,8 +79,8 @@ namespace khttpd::framework
     void parse_form_params() const;
     void parse_multipart_data() const;
 
-    std::string trim(const std::string& str) const;
-    std::string extract_header_value(const std::string& headers, const std::string& header_name) const;
+    static std::string trim(const std::string& str);
+    static std::string extract_header_value(const std::string& headers, const std::string& header_name);
   };
 }
 #endif // KHTTPD_FRAMEWORK_CONTEXT_HTTP_CONTEXT_HPP_

@@ -3,26 +3,28 @@
 #include <fmt/core.h>
 #include <algorithm> // for std::remove_if
 #include <iomanip>   // for std::quoted (not directly used here, but useful for debugging)
+#include <regex>
 #include <boost/beast/version.hpp>
+#include <boost/url/parse.hpp>
 
 namespace khttpd::framework
 {
   // Helper to trim whitespace from a string
-  std::string HttpContext::trim(const std::string& str) const
+  std::string HttpContext::trim(const std::string& str)
   {
-    size_t first = str.find_first_not_of(" \t\n\r");
+    const size_t first = str.find_first_not_of(" \t\n\r");
     if (std::string::npos == first)
     {
       return str;
     }
-    size_t last = str.find_last_not_of(" \t\n\r");
-    return str.substr(first, (last - first + 1));
+    const size_t last = str.find_last_not_of(" \t\n\r");
+    return str.substr(first, last - first + 1);
   }
 
   // Helper to extract a header value from a block of headers
-  std::string HttpContext::extract_header_value(const std::string& headers, const std::string& header_name) const
+  std::string HttpContext::extract_header_value(const std::string& headers, const std::string& header_name)
   {
-    std::string search_str = "\r\n" + header_name + ":";
+    const std::string search_str = "\r\n" + header_name + ":";
     size_t pos = headers.find(search_str);
     if (pos == std::string::npos)
     {
@@ -66,8 +68,8 @@ namespace khttpd::framework
     {
       return;
     }
-    boost::system::result<boost::urls::url_view> url_result = boost::urls::parse_relative_ref(req_.target());
-    if (url_result.has_value())
+    if (boost::system::result<boost::urls::url_view> url_result = boost::urls::parse_relative_ref(req_.target());
+      url_result.has_value())
     {
       parsed_url_ = url_result.value();
       cached_path_ = parsed_url_.path();
@@ -111,18 +113,16 @@ namespace khttpd::framework
 
   std::optional<std::string> HttpContext::get_path_param(const std::string& key) const
   {
-    auto it = path_params_.find(key);
-    if (it != path_params_.end())
+    if (const auto it = path_params_.find(key); it != path_params_.end())
     {
       return it->second;
     }
     return std::nullopt;
   }
 
-  std::optional<std::string> HttpContext::get_header(boost::beast::string_view name) const
+  std::optional<std::string> HttpContext::get_header(const boost::beast::string_view name) const
   {
-    auto it = req_.find(name);
-    if (it != req_.end())
+    if (const auto it = req_.find(name); it != req_.end())
     {
       return std::string(it->value());
     }
@@ -135,8 +135,8 @@ namespace khttpd::framework
     {
       return cached_json_;
     }
-    auto content_type = get_header(boost::beast::http::field::content_type);
-    if (!content_type || content_type->find("application/json") == std::string::npos)
+    if (const auto content_type = get_header(boost::beast::http::field::content_type);
+      !content_type || content_type->find("application/json") == std::string::npos)
     {
       return std::nullopt;
     }
@@ -149,7 +149,8 @@ namespace khttpd::framework
     {
       fmt::print(stderr, "Error parsing JSON body: {}\n", e.what());
       return std::nullopt;
-    } catch (const std::exception& e)
+    }
+    catch (const std::exception& e)
     {
       fmt::print(stderr, "Unexpected error parsing JSON body: {}\n", e.what());
       return std::nullopt;
@@ -162,18 +163,17 @@ namespace khttpd::framework
     {
       return;
     }
-    auto content_type = get_header(boost::beast::http::field::content_type);
-    if (!content_type || content_type->find("application/x-www-form-urlencoded") == std::string::npos)
+    if (const auto content_type = get_header(boost::beast::http::field::content_type);
+      !content_type || content_type->find("application/x-www-form-urlencoded") == std::string::npos)
     {
       form_params_parsed_ = true;
       return;
     }
-    auto query_string = "?" + body();
-    boost::system::result<boost::urls::url_view> url_query_result = boost::urls::parse_relative_ref(query_string);
+    const auto query_string = "?" + body();
 
-    if (url_query_result.has_value())
+    if (auto url_query_result = boost::urls::parse_relative_ref(query_string); url_query_result.has_value())
     {
-      boost::urls::url_view url = url_query_result.value();
+      const auto url = url_query_result.value();
       for (const auto& param : url.params())
       {
         cached_form_params_[param.key] = param.value;
@@ -189,8 +189,7 @@ namespace khttpd::framework
   std::optional<std::string> HttpContext::get_form_param(const std::string& key) const
   {
     parse_form_params();
-    auto it = cached_form_params_.find(key);
-    if (it != cached_form_params_.end())
+    if (const auto it = cached_form_params_.find(key); it != cached_form_params_.end())
     {
       return it->second;
     }
@@ -286,8 +285,7 @@ namespace khttpd::framework
       std::string filename_str;
 
       std::regex disposition_regex("name=\"([^\"]+)\"(?:;\\s*filename=\"([^\"]+)\")?");
-      std::smatch matches;
-      if (std::regex_search(content_disposition, matches, disposition_regex))
+      if (std::smatch matches; std::regex_search(content_disposition, matches, disposition_regex))
       {
         if (matches.size() > 1)
         {
@@ -331,8 +329,7 @@ namespace khttpd::framework
   std::optional<std::string> HttpContext::get_multipart_field(const std::string& key) const
   {
     parse_multipart_data();
-    auto it = cached_multipart_fields_.find(key);
-    if (it != cached_multipart_fields_.end())
+    if (const auto it = cached_multipart_fields_.find(key); it != cached_multipart_fields_.end())
     {
       return it->second;
     }
@@ -342,7 +339,7 @@ namespace khttpd::framework
   const std::vector<MultipartFile>* HttpContext::get_uploaded_files(const std::string& field_name) const
   {
     parse_multipart_data();
-    auto it = cached_multipart_files_.find(field_name);
+    const auto it = cached_multipart_files_.find(field_name);
     if (it != cached_multipart_files_.end())
     {
       return &it->second;
@@ -351,33 +348,33 @@ namespace khttpd::framework
   }
 
 
-  void HttpContext::set_status(boost::beast::http::status status)
+  void HttpContext::set_status(const boost::beast::http::status status) const
   {
     res_.result(status);
   }
 
-  void HttpContext::set_body(std::string body)
+  void HttpContext::set_body(std::string body) const
   {
     res_.body() = std::move(body);
     res_.prepare_payload();
   }
 
-  void HttpContext::set_header(boost::beast::string_view name, boost::beast::string_view value)
+  void HttpContext::set_header(const boost::beast::string_view name, const boost::beast::string_view value) const
   {
     res_.set(name, value);
   }
 
-  void HttpContext::set_header(boost::beast::http::field name, boost::beast::string_view value)
+  void HttpContext::set_header(const boost::beast::http::field name, const boost::beast::string_view value) const
   {
     set_header(boost::beast::http::to_string(name), value);
   }
 
-  std::optional<std::string> HttpContext::get_header(boost::beast::http::field name) const
+  std::optional<std::string> HttpContext::get_header(const boost::beast::http::field name) const
   {
     return get_header(boost::beast::http::to_string(name));
   }
 
-  void HttpContext::set_content_type(boost::beast::string_view type)
+  void HttpContext::set_content_type(const boost::beast::string_view type) const
   {
     res_.set(boost::beast::http::field::content_type, type);
   }

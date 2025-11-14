@@ -7,6 +7,9 @@
 #include <boost/asio/ip/tcp.hpp>
 #include <thread>
 #include <memory>
+#include <fmt/base.h>
+#include <fmt/format.h>
+
 #include "HelloController.hpp"
 #include "HelloWsController.hpp"
 

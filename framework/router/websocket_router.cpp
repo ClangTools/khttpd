@@ -7,12 +7,12 @@ namespace khttpd::framework
 {
   bool websocket::send_message(const std::string& id, const std::string& msg, const bool is_text)
   {
-    return khttpd::framework::WebsocketSession::send_message(id, msg, is_text);
+    return WebsocketSession::send_message(id, msg, is_text);
   }
 
   size_t websocket::send_message(const std::vector<std::string>& ids, const std::string& msg, const bool is_text)
   {
-    return khttpd::framework::WebsocketSession::send_message(ids, msg, is_text);
+    return WebsocketSession::send_message(ids, msg, is_text);
   }
 
   WebsocketRouter::WebsocketRouter() = default;
@@ -34,55 +34,47 @@ namespace khttpd::framework
 
   void WebsocketRouter::dispatch_open(const std::string& path, WebsocketContext& ctx)
   {
-    auto it = handlers_.find(path);
-    if (it != handlers_.end() && it->second.on_open)
-    {
-      it->second.on_open(ctx);
-    }
-    else
+    const auto it = handlers_.find(path);
+    if (it == handlers_.end() || !it->second.on_open)
     {
       fmt::print(stderr, "No on_open handler found for WS path: {}\n", path);
+      return;
     }
+    it->second.on_open(ctx);
   }
 
   void WebsocketRouter::dispatch_message(const std::string& path, WebsocketContext& ctx)
   {
-    auto it = handlers_.find(path);
-    if (it != handlers_.end() && it->second.on_message)
-    {
-      it->second.on_message(ctx);
-    }
-    else
+    const auto it = handlers_.find(path);
+    if (it == handlers_.end() || !it->second.on_message)
     {
       fmt::print(stderr, "No on_message handler found for WS path: {}\n", path);
       // Default behavior: if no handler, just close connection? Echo?
       // For now, nothing happens.
+      return;
     }
+    it->second.on_message(ctx);
   }
 
   void WebsocketRouter::dispatch_close(const std::string& path, WebsocketContext& ctx)
   {
-    auto it = handlers_.find(path);
-    if (it != handlers_.end() && it->second.on_close)
-    {
-      it->second.on_close(ctx);
-    }
-    else
+    const auto it = handlers_.find(path);
+    if (it == handlers_.end() || !it->second.on_close)
     {
       fmt::print(stderr, "No on_close handler found for WS path: {}\n", path);
+      return;
     }
+    it->second.on_close(ctx);
   }
 
   void WebsocketRouter::dispatch_error(const std::string& path, WebsocketContext& ctx)
   {
-    auto it = handlers_.find(path);
-    if (it != handlers_.end() && it->second.on_error)
-    {
-      it->second.on_error(ctx);
-    }
-    else
+    const auto it = handlers_.find(path);
+    if (it == handlers_.end() || !it->second.on_error)
     {
       fmt::print(stderr, "No on_error handler found for WS path: {} (error: {})\n", path, ctx.error_code.message());
+      return;
     }
+    it->second.on_error(ctx);
   }
 }

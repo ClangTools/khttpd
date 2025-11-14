@@ -1,12 +1,11 @@
 // framework/router/http_router.cpp
 #include "http_router.hpp"
 #include <fmt/core.h>
+#include <algorithm>
 
 namespace khttpd::framework
 {
-  HttpRouter::HttpRouter()
-  {
-  }
+  HttpRouter::HttpRouter() = default;
 
   std::tuple<std::regex, std::vector<std::string>, int, int> HttpRouter::parse_path_pattern(
     const std::string& path_pattern)
@@ -21,7 +20,7 @@ namespace khttpd::framework
     std::sregex_iterator it(path_pattern.begin(), path_pattern.end(), param_regex);
     std::sregex_iterator end;
 
-    std::string::const_iterator current_pos = path_pattern.begin();
+    auto current_pos = path_pattern.begin();
     int param_count = 0;
 
     for (std::sregex_iterator temp_it(path_pattern.begin(), path_pattern.end(), param_regex); temp_it != end; ++temp_it)
@@ -35,7 +34,7 @@ namespace khttpd::framework
 
     while (it != end)
     {
-      std::string literal_part = std::string(current_pos, it->prefix().second);
+      auto literal_part = std::string(current_pos, it->prefix().second);
       if (!literal_part.empty())
       {
         size_t start = 0;
@@ -72,7 +71,7 @@ namespace khttpd::framework
       current_pos = it->suffix().first;
       ++it;
     }
-    std::string tail_literal_part = std::string(current_pos, path_pattern.end());
+    auto tail_literal_part = std::string(current_pos, path_pattern.end());
     if (!tail_literal_part.empty())
     {
       size_t start = 0;
@@ -97,7 +96,8 @@ namespace khttpd::framework
     return {std::regex(regex_str), param_names, literal_segments, dynamic_segments};
   }
 
-  void HttpRouter::add_route(const std::string& path_pattern, boost::beast::http::verb method, HttpHandler handler)
+  void HttpRouter::add_route(const std::string& path_pattern, const boost::beast::http::verb method,
+                             HttpHandler handler)
   {
     for (auto& entry : routes_)
     {
@@ -149,7 +149,7 @@ namespace khttpd::framework
     add_route(path, boost::beast::http::verb::options, std::move(handler));
   }
 
-  bool HttpRouter::dispatch(HttpContext& ctx)
+  bool HttpRouter::dispatch(HttpContext& ctx) const
   {
     const std::string request_path = ctx.path();
     const boost::beast::http::verb request_method = ctx.method();

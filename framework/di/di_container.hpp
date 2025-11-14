@@ -62,15 +62,14 @@ namespace khttpd::framework
       const auto type_idx = std::type_index(typeid(T));
 
       // 1. 尝试从单例缓存中获取
-      auto it_singleton = singletons_.find(type_idx);
-      if (it_singleton != singletons_.end())
+      if (const auto it_singleton = singletons_.find(type_idx); it_singleton != singletons_.end())
       {
         // std::cout << "Returning cached instance for: " << typeid(T).name() << std::endl; // For testing, suppress verbose output
         return std::static_pointer_cast<T>(it_singleton->second);
       }
 
       // 2. 如果不在缓存中，查找工厂函数
-      auto it_factory = component_factories_.find(type_idx);
+      const auto it_factory = component_factories_.find(type_idx);
       if (it_factory == component_factories_.end())
       {
         throw std::runtime_error("Component not registered or dependency missing: " + std::string(typeid(T).name()));

@@ -8,7 +8,6 @@
 #include <map>
 #include <vector>
 #include <regex>
-#include <algorithm> // for std::sort
 
 namespace khttpd::framework
 {
@@ -49,18 +48,19 @@ namespace khttpd::framework
     void del(const std::string& path, HttpHandler handler);
     void options(const std::string& path, HttpHandler handler);
 
-    bool dispatch(HttpContext& ctx);
+    bool dispatch(HttpContext& ctx) const;
 
   private:
     std::vector<RouteEntry> routes_;
 
     void add_route(const std::string& path_pattern, boost::beast::http::verb method, HttpHandler handler);
 
-    std::tuple<std::regex, std::vector<std::string>, int, int> parse_path_pattern(const std::string& path_pattern);
+    static std::tuple<std::regex, std::vector<std::string>, int, int> parse_path_pattern(
+      const std::string& path_pattern);
 
-    void handle_not_found(HttpContext& ctx);
-    void handle_method_not_allowed(HttpContext& ctx,
-                                   const std::map<boost::beast::http::verb, HttpHandler>& allowed_methods);
+    static void handle_not_found(HttpContext& ctx);
+    static void handle_method_not_allowed(HttpContext& ctx,
+                                          const std::map<boost::beast::http::verb, HttpHandler>& allowed_methods);
   };
 }
 #endif // KHTTPD_FRAMEWORK_ROUTER_HTTP_ROUT

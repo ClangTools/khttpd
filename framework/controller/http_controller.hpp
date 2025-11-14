@@ -1,9 +1,7 @@
 // framework/controller/http_controller.hpp
 #ifndef KHTTPD_FRAMEWORK_CONTROLLER_HTTP_CONTROLLER_HPP
 #define KHTTPD_FRAMEWORK_CONTROLLER_HTTP_CONTROLLER_HPP
-#include <fmt/format.h>
 
-#include "context/http_context.hpp"
 #include "router/websocket_router.hpp"
 #include "router/http_router.hpp"
 
@@ -68,14 +66,14 @@ router.VERB(PATH, bind_handler(&std::decay_t<decltype(*this)>::METHOD_NAME))
 
     virtual std::shared_ptr<BaseController> register_routes(HttpRouter& router) = 0;
 
-    inline virtual std::shared_ptr<BaseController> register_routes(WebsocketRouter& router)
+    virtual std::shared_ptr<BaseController> register_routes(WebsocketRouter& router)
     {
       return this->shared_from_this();
     }
 
   protected:
     template <typename MethodPtr>
-    inline auto bind_handler(MethodPtr method_ptr)
+    auto bind_handler(MethodPtr method_ptr)
     {
       return std::bind(method_ptr, this->shared_from_this(), std::placeholders::_1);
     }
