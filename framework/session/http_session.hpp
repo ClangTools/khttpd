@@ -41,7 +41,7 @@ namespace khttpd::framework
     std::shared_ptr<WebsocketSession> ws_session_;
 
     void do_read();
-    void on_read(beast::error_code ec, std::size_t bytes_transferred);
+    void on_read(const beast::error_code& ec, std::size_t bytes_transferred);
 
     void handle_request();
     // 新增：尝试处理静态文件请求

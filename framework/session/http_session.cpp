@@ -6,23 +6,6 @@
 
 using namespace khttpd::framework;
 
-// 辅助函数：根据文件扩展名获取 MIME 类型
-std::string HttpSession::mime_type_from_extension(const std::string& ext)
-{
-  if (ext == ".html" || ext == ".htm") return "text/html";
-  if (ext == ".css") return "text/css";
-  if (ext == ".js") return "application/javascript";
-  if (ext == ".json") return "application/json";
-  if (ext == ".png") return "image/png";
-  if (ext == ".jpg" || ext == ".jpeg") return "image/jpeg";
-  if (ext == ".gif") return "image/gif";
-  if (ext == ".svg") return "image/svg+xml";
-  if (ext == ".pdf") return "application/pdf";
-  if (ext == ".txt") return "text/plain";
-  // Add more MIME types as needed
-  return "application/octet-stream"; // Default for unknown types
-}
-
 HttpSession::HttpSession(tcp::socket&& socket, HttpRouter& router, WebsocketRouter& ws_router,
                          const std::string& web_root)
   : stream_(std::move(socket)),
@@ -54,7 +37,7 @@ void HttpSession::do_read()
                    beast::bind_front_handler(&HttpSession::on_read, shared_from_this()));
 }
 
-void HttpSession::on_read(beast::error_code ec, std::size_t bytes_transferred)
+void HttpSession::on_read(const beast::error_code& ec, std::size_t bytes_transferred)
 {
   boost::ignore_unused(bytes_transferred);
 
@@ -68,7 +51,7 @@ void HttpSession::on_read(beast::error_code ec, std::size_t bytes_transferred)
     return;
   }
 
-  if (boost::beast::websocket::is_upgrade(req_))
+  if (beast::websocket::is_upgrade(req_))
   {
     fmt::print("Detected WebSocket upgrade request for target: {}\n", req_.target());
     handle_websocket_upgrade();
@@ -100,50 +83,6 @@ void HttpSession::handle_request()
 
   send_response(std::move(res_));
 }
-
-void HttpSession::send_response(http::message_generator msg)
-{
-  bool keep_alive = msg.keep_alive();
-  beast::async_write(stream_, std::move(msg),
-                     beast::bind_front_handler(&HttpSession::on_write, shared_from_this(), keep_alive));
-}
-
-void HttpSession::on_write(bool keep_alive, beast::error_code ec, std::size_t bytes_transferred)
-{
-  boost::ignore_unused(bytes_transferred);
-
-  if (ec)
-  {
-    fmt::print(stderr, "HttpSession on_write error: {}\n", ec.message());
-    return;
-  }
-
-  if (!keep_alive)
-  {
-    return do_close();
-  }
-
-  do_read();
-}
-
-void HttpSession::do_close()
-{
-  beast::error_code ec;
-  stream_.socket().shutdown(tcp::socket::shutdown_send, ec);
-  if (ec)
-  {
-    fmt::print(stderr, "HttpSession shutdown error: {}\n", ec.message());
-  }
-}
-
-void HttpSession::handle_websocket_upgrade()
-{
-  ws_session_ = std::make_shared<WebsocketSession>(stream_.release_socket(), websocket_router_,
-                                                   std::string(req_.target()));
-
-  ws_session_->run_handshake(req_);
-}
-
 
 // 尝试服务静态文件
 bool HttpSession::do_serve_static_file()
@@ -275,4 +214,65 @@ bool HttpSession::do_serve_static_file()
   // 发送响应
   send_response(std::move(file_res));
   return true; // 静态文件已处理
+}
+
+void HttpSession::send_response(http::message_generator msg)
+{
+  bool keep_alive = msg.keep_alive();
+  beast::async_write(stream_, std::move(msg),
+                     beast::bind_front_handler(&HttpSession::on_write, shared_from_this(), keep_alive));
+}
+
+void HttpSession::on_write(bool keep_alive, beast::error_code ec, std::size_t bytes_transferred)
+{
+  boost::ignore_unused(bytes_transferred);
+
+  if (ec)
+  {
+    fmt::print(stderr, "HttpSession on_write error: {}\n", ec.message());
+    return;
+  }
+
+  if (!keep_alive)
+  {
+    return do_close();
+  }
+
+  do_read();
+}
+
+void HttpSession::do_close()
+{
+  beast::error_code ec;
+  stream_.socket().shutdown(tcp::socket::shutdown_send, ec);
+  if (ec)
+  {
+    fmt::print(stderr, "HttpSession shutdown error: {}\n", ec.message());
+  }
+}
+
+void HttpSession::handle_websocket_upgrade()
+{
+  ws_session_ = std::make_shared<WebsocketSession>(stream_.release_socket(), websocket_router_,
+                                                   std::string(req_.target()));
+
+  ws_session_->run_handshake(req_);
+}
+
+
+// 辅助函数：根据文件扩展名获取 MIME 类型
+std::string HttpSession::mime_type_from_extension(const std::string& ext)
+{
+  if (ext == ".html" || ext == ".htm") return "text/html";
+  if (ext == ".css") return "text/css";
+  if (ext == ".js") return "application/javascript";
+  if (ext == ".json") return "application/json";
+  if (ext == ".png") return "image/png";
+  if (ext == ".jpg" || ext == ".jpeg") return "image/jpeg";
+  if (ext == ".gif") return "image/gif";
+  if (ext == ".svg") return "image/svg+xml";
+  if (ext == ".pdf") return "application/pdf";
+  if (ext == ".txt") return "text/plain";
+  // Add more MIME types as needed
+  return "application/octet-stream"; // Default for unknown types
 }
