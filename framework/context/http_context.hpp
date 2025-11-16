@@ -26,8 +26,11 @@ namespace khttpd::framework
   public:
     using Request = boost::beast::http::request<boost::beast::http::string_body>;
     using Response = boost::beast::http::response<boost::beast::http::string_body>;
+    using WriteHandler = std::function<bool(const std::string& buffer)>;
+    using HttpStreamHandler = std::function<void(HttpContext&, const WriteHandler&)>;
 
     HttpContext(Request& req, Response& res);
+    ~HttpContext();
 
     const std::string& path() const;
     boost::beast::http::verb method() const;
@@ -46,6 +49,7 @@ namespace khttpd::framework
 
     void set_status(boost::beast::http::status status) const;
     void set_body(std::string body) const;
+    void chunked(const HttpStreamHandler& handler);
     void set_header(boost::beast::string_view name, boost::beast::string_view value) const;
     void set_header(boost::beast::http::field name, boost::beast::string_view value) const;
     void set_content_type(boost::beast::string_view type) const;
@@ -54,6 +58,7 @@ namespace khttpd::framework
     Response& get_response() const { return res_; }
     Request& get_request() { return req_; }
     Response& get_response() { return res_; }
+    HttpStreamHandler get_stream_handler() const { return do_stream_chunk; }
 
     void set_path_params(std::map<std::string, std::string> params) const;
 
@@ -74,6 +79,7 @@ namespace khttpd::framework
     mutable std::map<std::string, std::string> cached_multipart_fields_;
     mutable std::map<std::string, std::vector<MultipartFile>> cached_multipart_files_;
     mutable bool multipart_parsed_ = false;
+    HttpStreamHandler do_stream_chunk = nullptr;
 
     void parse_url_components() const;
     void parse_form_params() const;

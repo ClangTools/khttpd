@@ -1,4 +1,7 @@
 #include "http_session.hpp"
+
+#include <thread>
+
 #include "context/http_context.hpp"
 #include <fmt/core.h>
 #include <utility>
@@ -65,9 +68,9 @@ void HttpSession::handle_request()
 {
   res_ = {};
 
-  HttpContext ctx(req_, res_);
+  ctx = std::make_shared<HttpContext>(req_, res_);
 
-  const auto flag = router_.dispatch(ctx);
+  const auto flag = router_.dispatch(*ctx);
 
   if (!flag)
   {
@@ -80,8 +83,14 @@ void HttpSession::handle_request()
       }
     }
   }
-
-  send_response(std::move(res_));
+  if (res_.chunked())
+  {
+    send_chunked_response();
+  }
+  else
+  {
+    send_response(std::move(res_));
+  }
 }
 
 // 尝试服务静态文件
@@ -216,11 +225,72 @@ bool HttpSession::do_serve_static_file()
   return true; // 静态文件已处理
 }
 
+void HttpSession::send_chunked_response()
+{
+  res_.body() = "";
+  sr_.emplace(res_);
+
+  http::async_write_header(stream_, *sr_,
+                           beast::bind_front_handler(
+                             &HttpSession::on_write_header,
+                             shared_from_this()));
+}
+
 void HttpSession::send_response(http::message_generator msg)
 {
   bool keep_alive = msg.keep_alive();
   beast::async_write(stream_, std::move(msg),
                      beast::bind_front_handler(&HttpSession::on_write, shared_from_this(), keep_alive));
+}
+
+void HttpSession::on_write_header(beast::error_code ec, std::size_t bytes_transferred)
+{
+  boost::ignore_unused(bytes_transferred);
+  if (ec)
+  {
+    fmt::print(stderr, "HttpSession on_write_header error: {}\n", ec.message());
+    return;
+  }
+  std::thread([self = shared_from_this()]()
+  {
+    std::mutex mtx;
+    self->ctx->get_stream_handler()(*self->ctx, [self, &mtx](const std::string& buffer)
+    {
+      try
+      {
+        std::unique_lock<std::mutex> lock{mtx};
+        // std::stringstream ss_header;
+        // ss_header << std::hex << buffer.length() << "\r\n" << buffer << "\r\n";
+        // net::write(self->stream_, net::buffer(ss_header.str()));
+
+        std::stringstream ss_header;
+        ss_header << std::hex << buffer.length() << "\r\n";
+        net::write(self->stream_, net::buffer(ss_header.str()));
+        net::write(self->stream_, net::buffer(buffer.data(), buffer.length()));
+        net::write(self->stream_, net::buffer("\r\n", 2));
+        return true;
+      }
+      catch (std::exception& e)
+      {
+        fmt::print(stderr, "Exception: {}\n", e.what());
+        return false;
+      }
+    });
+    self->do_write_final_chunk();
+  }).detach();
+}
+
+void HttpSession::do_write_final_chunk()
+{
+  net::async_write(stream_, net::buffer("0\r\n\r\n"),
+                   beast::bind_front_handler(
+                     &HttpSession::on_shutdown,
+                     shared_from_this(), res_.keep_alive()));
+}
+
+void HttpSession::on_shutdown(bool keep_alive, beast::error_code ec, std::size_t bytes_transferred)
+{
+  on_write(keep_alive, ec, bytes_transferred);
 }
 
 void HttpSession::on_write(bool keep_alive, beast::error_code ec, std::size_t bytes_transferred)

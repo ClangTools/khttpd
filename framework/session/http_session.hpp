@@ -39,6 +39,8 @@ namespace khttpd::framework
     const boost::filesystem::path web_root_path_;
     boost::filesystem::path canonical_web_root_path_;
     std::shared_ptr<WebsocketSession> ws_session_;
+    std::optional<http::response_serializer<http::string_body>> sr_;
+    std::shared_ptr<HttpContext> ctx = nullptr;
 
     void do_read();
     void on_read(const beast::error_code& ec, std::size_t bytes_transferred);
@@ -47,9 +49,13 @@ namespace khttpd::framework
     // 新增：尝试处理静态文件请求
     bool do_serve_static_file();
 
+    void send_chunked_response();
     void send_response(http::message_generator msg);
+    void on_write_header(beast::error_code ec, std::size_t bytes_transferred);
     void on_write(bool keep_alive, beast::error_code ec, std::size_t bytes_transferred);
 
+    void do_write_final_chunk();
+    void on_shutdown(bool keep_alive, beast::error_code ec, std::size_t);
     void do_close();
 
     void handle_websocket_upgrade();

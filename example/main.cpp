@@ -11,6 +11,7 @@
 #include <fmt/format.h>
 
 #include "HelloController.hpp"
+#include "HelloStreamController.hpp"
 #include "HelloWsController.hpp"
 
 namespace net = boost::asio;
@@ -41,6 +42,7 @@ int main(int argc, char* argv[])
   auto& ws_router = server->get_websocket_router();
 
   HelloController::create()->register_routes(http_router)->register_routes(ws_router);
+  HelloStreamController::create()->register_routes(http_router)->register_routes(ws_router);
   HelloWsController::create()->register_routes(http_router)->register_routes(ws_router);
 
   http_router.get("/", [](khttpd::framework::HttpContext& ctx)

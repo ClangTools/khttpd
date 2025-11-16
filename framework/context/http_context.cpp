@@ -62,6 +62,8 @@ namespace khttpd::framework
     res_.set(boost::beast::http::field::content_type, "text/plain");
   }
 
+  HttpContext::~HttpContext() = default;
+
   void HttpContext::parse_url_components() const
   {
     if (url_parsed_)
@@ -357,6 +359,12 @@ namespace khttpd::framework
   {
     res_.body() = std::move(body);
     res_.prepare_payload();
+  }
+
+  void HttpContext::chunked(const HttpStreamHandler& handler)
+  {
+    res_.chunked(handler != nullptr);
+    this->do_stream_chunk = handler;
   }
 
   void HttpContext::set_header(const boost::beast::string_view name, const boost::beast::string_view value) const
