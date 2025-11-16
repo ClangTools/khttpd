@@ -35,7 +35,6 @@ private:
     {
       for (int i = 0; i < num_chunks_to_send_; i++)
       {
-        sleep(1);
         auto json = fmt::format(R"("id": {}, "url": "/stream/{}", "args": , "headers": {})",
                                 i, num_str, "\n");
         if (!writeHandler(json)) { break; }
