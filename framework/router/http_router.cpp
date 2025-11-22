@@ -149,6 +149,31 @@ namespace khttpd::framework
     add_route(path, boost::beast::http::verb::options, std::move(handler));
   }
 
+  void HttpRouter::add_interceptor(std::shared_ptr<Interceptor> interceptor)
+  {
+    interceptors_.push_back(std::move(interceptor));
+  }
+
+  InterceptorResult HttpRouter::run_pre_interceptors(HttpContext& ctx) const
+  {
+    for (const auto& interceptor : interceptors_)
+    {
+      if (interceptor->handle_request(ctx) == InterceptorResult::Stop)
+      {
+        return InterceptorResult::Stop;
+      }
+    }
+    return InterceptorResult::Continue;
+  }
+
+  void HttpRouter::run_post_interceptors(HttpContext& ctx) const
+  {
+    for (auto it = interceptors_.rbegin(); it != interceptors_.rend(); ++it)
+    {
+      (*it)->handle_response(ctx);
+    }
+  }
+
   bool HttpRouter::dispatch(HttpContext& ctx) const
   {
     const std::string request_path = ctx.path();

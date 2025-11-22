@@ -10,6 +10,7 @@
 #include <map>
 #include <optional>
 #include <vector>
+#include <any>
 
 namespace khttpd::framework
 {
@@ -62,6 +63,32 @@ namespace khttpd::framework
 
     void set_path_params(std::map<std::string, std::string> params) const;
 
+    // Extended data for interceptors/handlers
+    void set_attribute(const std::string& key, std::any value) const {
+        extended_data_[key] = std::move(value);
+    }
+
+    std::any get_attribute(const std::string& key) const {
+        auto it = extended_data_.find(key);
+        if (it != extended_data_.end()) {
+            return it->second;
+        }
+        return {};
+    }
+
+    template<typename T>
+    std::optional<T> get_attribute_as(const std::string& key) const {
+        auto it = extended_data_.find(key);
+        if (it != extended_data_.end()) {
+            try {
+                return std::any_cast<T>(it->second);
+            } catch (const std::bad_any_cast&) {
+                return std::nullopt;
+            }
+        }
+        return std::nullopt;
+    }
+
   private:
     Request& req_;
     Response& res_;
@@ -80,6 +107,8 @@ namespace khttpd::framework
     mutable std::map<std::string, std::vector<MultipartFile>> cached_multipart_files_;
     mutable bool multipart_parsed_ = false;
     HttpStreamHandler do_stream_chunk = nullptr;
+
+    mutable std::map<std::string, std::any> extended_data_;
 
     void parse_url_components() const;
     void parse_form_params() const;

@@ -3,11 +3,13 @@
 #define KHTTPD_FRAMEWORK_ROUTER_HTTP_ROUT
 
 #include "context/http_context.hpp"
+#include "interceptor/interceptor.hpp"
 #include <functional>
 #include <string>
 #include <map>
 #include <vector>
 #include <regex>
+#include <memory>
 
 namespace khttpd::framework
 {
@@ -48,10 +50,15 @@ namespace khttpd::framework
     void del(const std::string& path, HttpHandler handler);
     void options(const std::string& path, HttpHandler handler);
 
+    void add_interceptor(std::shared_ptr<Interceptor> interceptor);
+    InterceptorResult run_pre_interceptors(HttpContext& ctx) const;
+    void run_post_interceptors(HttpContext& ctx) const;
+
     bool dispatch(HttpContext& ctx) const;
 
   private:
     std::vector<RouteEntry> routes_;
+    std::vector<std::shared_ptr<Interceptor>> interceptors_;
 
     void add_route(const std::string& path_pattern, boost::beast::http::verb method, HttpHandler handler);
 
