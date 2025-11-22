@@ -28,6 +28,8 @@ namespace khttpd::framework
     HttpRouter& get_http_router();
     const HttpRouter& get_http_router() const; // const 版本
 
+    void add_interceptor(std::shared_ptr<Interceptor> interceptor);
+
     WebsocketRouter& get_websocket_router();
     const WebsocketRouter& get_websocket_router() const; // const 版本
 

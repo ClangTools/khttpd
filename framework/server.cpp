@@ -7,7 +7,7 @@
 
 namespace khttpd::framework
 {
-  Server::Server(const tcp::endpoint& endpoint, std::string  web_root, int num_threads)
+  Server::Server(const tcp::endpoint& endpoint, std::string web_root, int num_threads)
     : ioc_(std::in_place, num_threads),
       num_threads_(num_threads),
       signals_(*ioc_, SIGINT, SIGTERM),
@@ -65,6 +65,11 @@ namespace khttpd::framework
   const HttpRouter& Server::get_http_router() const
   {
     return http_router_;
+  }
+
+  void Server::add_interceptor(std::shared_ptr<Interceptor> interceptor)
+  {
+    http_router_.add_interceptor(interceptor);
   }
 
   WebsocketRouter& Server::get_websocket_router()
