@@ -8,6 +8,12 @@
 
 class HelloController : public khttpd::framework::BaseController<HelloController>
 {
+private:
+  std::string base_path() override
+  {
+    return "/hello";
+  }
+
 public:
   static std::shared_ptr<HelloController> create() { return std::make_shared<HelloController>(); }
 

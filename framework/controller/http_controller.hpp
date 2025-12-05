@@ -10,7 +10,7 @@ namespace khttpd::framework
 {
 #ifndef KHTTPD_ROUTE
 #define KHTTPD_ROUTE(VERB, PATH, METHOD_NAME) \
-router.VERB(PATH, bind_handler(&std::decay_t<decltype(*this)>::METHOD_NAME))
+router.VERB(base_path() + PATH, bind_handler(&std::decay_t<decltype(*this)>::METHOD_NAME))
 #endif
 #ifndef KHTTPD_WSROUTE
 #define KHTTPD_WSROUTE_NULL_HANDLER nullptr
@@ -19,7 +19,7 @@ router.VERB(PATH, bind_handler(&std::decay_t<decltype(*this)>::METHOD_NAME))
     bind_handler(&std::decay_t<decltype(*this)>::METHOD_NAME)
 
 #define KHTTPD_WSROUTE_2(PATH, ONMESSAGE_METHOD_NAME) \
-    router.add_handler(PATH, \
+    router.add_handler(base_path() + PATH, \
         KHTTPD_WSROUTE_NULL_HANDLER, /* ONOPEN */ \
         KHTTPD_WSROUTE_BIND_HANDLER(ONMESSAGE_METHOD_NAME), \
         KHTTPD_WSROUTE_NULL_HANDLER, /* ONCLOSE */ \
@@ -27,7 +27,7 @@ router.VERB(PATH, bind_handler(&std::decay_t<decltype(*this)>::METHOD_NAME))
     )
 
 #define KHTTPD_WSROUTE_3(PATH, ONMESSAGE_METHOD_NAME, ONCLOSE_METHOD_NAME) \
-    router.add_handler(PATH, \
+    router.add_handler(base_path() + PATH, \
         KHTTPD_WSROUTE_NULL_HANDLER, /* ONOPEN */ \
         KHTTPD_WSROUTE_BIND_HANDLER(ONMESSAGE_METHOD_NAME), \
         KHTTPD_WSROUTE_BIND_HANDLER(ONCLOSE_METHOD_NAME), \
@@ -35,7 +35,7 @@ router.VERB(PATH, bind_handler(&std::decay_t<decltype(*this)>::METHOD_NAME))
     )
 
 #define KHTTPD_WSROUTE_4(PATH, ONOPEN_METHOD_NAME, ONMESSAGE_METHOD_NAME, ONCLOSE_METHOD_NAME) \
-    router.add_handler(PATH, \
+    router.add_handler(base_path() + PATH, \
         KHTTPD_WSROUTE_BIND_HANDLER(ONOPEN_METHOD_NAME), \
         KHTTPD_WSROUTE_BIND_HANDLER(ONMESSAGE_METHOD_NAME), \
         KHTTPD_WSROUTE_BIND_HANDLER(ONCLOSE_METHOD_NAME), \
@@ -43,7 +43,7 @@ router.VERB(PATH, bind_handler(&std::decay_t<decltype(*this)>::METHOD_NAME))
     )
 
 #define KHTTPD_WSROUTE_5(PATH, ONOPEN_METHOD_NAME, ONMESSAGE_METHOD_NAME, ONCLOSE_METHOD_NAME, ONERROR_METHOD_NAME) \
-    router.add_handler(PATH, \
+    router.add_handler(base_path() + PATH, \
         KHTTPD_WSROUTE_BIND_HANDLER(ONOPEN_METHOD_NAME), \
         KHTTPD_WSROUTE_BIND_HANDLER(ONMESSAGE_METHOD_NAME), \
         KHTTPD_WSROUTE_BIND_HANDLER(ONCLOSE_METHOD_NAME), \
@@ -72,6 +72,11 @@ router.VERB(PATH, bind_handler(&std::decay_t<decltype(*this)>::METHOD_NAME))
     }
 
   protected:
+    virtual std::string base_path()
+    {
+      return "";
+    }
+
     template <typename MethodPtr>
     auto bind_handler(MethodPtr method_ptr)
     {
