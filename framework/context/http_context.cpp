@@ -124,7 +124,11 @@ namespace khttpd::framework
 
   std::optional<std::string> HttpContext::get_header(const boost::beast::string_view name) const
   {
-    return req_[name];
+    if (const auto it = req_.find(name); it != req_.end())
+    {
+      return std::string(it->value());
+    }
+    return std::nullopt;
   }
 
   std::optional<std::vector<std::string>> HttpContext::get_headers(boost::beast::string_view name) const
