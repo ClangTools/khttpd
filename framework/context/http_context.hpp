@@ -74,6 +74,12 @@ namespace khttpd::framework
       set_body(boost::json::serialize(t), opts);
     }
 
+    template <class T>
+    void set_body_from(T const& t, boost::json::storage_ptr sp = {}, boost::json::serialize_options const& opts = {})
+    {
+      set_body_json(boost::json::value_from(t, sp), opts);
+    }
+
     void chunked(const HttpStreamHandler& handler);
     void set_header(boost::beast::string_view name, boost::beast::string_view value) const;
     void set_header(boost::beast::http::field name, boost::beast::string_view value) const;
