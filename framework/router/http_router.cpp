@@ -238,4 +238,67 @@ namespace khttpd::framework
     ctx.set_header(boost::beast::http::field::allow, allowed_methods_str);
     fmt::print(stderr, "405 Method Not Allowed: {} {}\n", boost::beast::http::to_string(ctx.method()), ctx.path());
   }
+
+  void HttpRouter::add_exception_handler(std::shared_ptr<ExceptionHandlerBase> handler)
+  {
+    exception_handlers_.push_back(std::move(handler));
+  }
+
+  void HttpRouter::set_unknown_exception_handler(UnknownExceptionHandler handler)
+  {
+    unknown_exception_handler_ = std::move(handler);
+  }
+
+  void HttpRouter::handle_exception(std::exception_ptr eptr, HttpContext& ctx) const
+  {
+    if (!eptr)
+    {
+      // Should not happen, but safeguard against null pointer
+      fmt::print(stderr, "handle_exception called with null exception_ptr\n");
+      handle_unknown_exception(ctx);
+      return;
+    }
+
+    for (const auto& handler : exception_handlers_)
+    {
+      if (handler->try_handle(eptr, ctx))
+      {
+        return;
+      }
+    }
+
+    // Default handling for std::exception if no specific handler matched
+    try
+    {
+      std::rethrow_exception(eptr);
+    }
+    catch (const std::exception& e)
+    {
+      fmt::print(stderr, "Unhandled exception: {}\n", e.what());
+      ctx.set_status(boost::beast::http::status::internal_server_error);
+      ctx.set_content_type("text/html");
+      ctx.set_body(fmt::format("<h1>500 Internal Server Error</h1><p>Exception: {}</p>", e.what()));
+      return;
+    }
+    catch (...)
+    {
+        // Fall through to unknown exception handler
+    }
+    
+    handle_unknown_exception(ctx);
+  }
+
+  void HttpRouter::handle_unknown_exception(HttpContext& ctx) const
+  {
+    if (unknown_exception_handler_)
+    {
+      unknown_exception_handler_(ctx);
+      return;
+    }
+
+    fmt::print(stderr, "Unknown exception occurred.\n");
+    ctx.set_status(boost::beast::http::status::internal_server_error);
+    ctx.set_content_type("text/html");
+    ctx.set_body("<h1>500 Internal Server Error</h1><p>An unknown error occurred.</p>");
+  }
 }

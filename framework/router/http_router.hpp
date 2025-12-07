@@ -4,6 +4,7 @@
 
 #include "context/http_context.hpp"
 #include "interceptor/interceptor.hpp"
+#include "exception/exception_handler.hpp"
 #include <functional>
 #include <string>
 #include <map>
@@ -14,6 +15,7 @@
 namespace khttpd::framework
 {
   using HttpHandler = std::function<void(HttpContext&)>;
+  using UnknownExceptionHandler = std::function<void(HttpContext&)>;
 
   // 路由条目结构
   struct RouteEntry
@@ -54,11 +56,20 @@ namespace khttpd::framework
     InterceptorResult run_pre_interceptors(HttpContext& ctx) const;
     void run_post_interceptors(HttpContext& ctx) const;
 
+    // Exception handling
+    void add_exception_handler(std::shared_ptr<ExceptionHandlerBase> handler);
+    void set_unknown_exception_handler(UnknownExceptionHandler handler);
+    void handle_exception(std::exception_ptr eptr, HttpContext& ctx) const;
+    void handle_unknown_exception(HttpContext& ctx) const;
+
     bool dispatch(HttpContext& ctx) const;
 
   private:
     std::vector<RouteEntry> routes_;
     std::vector<std::shared_ptr<Interceptor>> interceptors_;
+    
+    std::vector<std::shared_ptr<ExceptionHandlerBase>> exception_handlers_;
+    UnknownExceptionHandler unknown_exception_handler_;
 
     void add_route(const std::string& path_pattern, boost::beast::http::verb method, HttpHandler handler);
 

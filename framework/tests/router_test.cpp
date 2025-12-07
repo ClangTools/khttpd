@@ -2,6 +2,7 @@
 #include "framework/router/websocket_router.hpp"
 #include "framework/context/http_context.hpp"
 #include "framework/context/websocket_context.hpp"
+#include "framework/exception/exception_handler.hpp" // Added
 #include <gtest/gtest.h>
 #include <boost/beast/http/empty_body.hpp>
 #include <boost/beast/core/error.hpp> // For boost::beast::error_code
@@ -235,6 +236,155 @@ TEST(HttpRouterTest, MethodNotAllowed)
   ASSERT_TRUE(allow_header.find("GET") != std::string::npos);
   ASSERT_TRUE(allow_header.find("POST") != std::string::npos);
   ASSERT_FALSE(allow_header.find("PUT") != std::string::npos);
+}
+
+// --- Exception Handling Tests ---
+
+class TestException : public std::runtime_error
+{
+public:
+  TestException(const char* msg) : std::runtime_error(msg)
+  {
+  }
+};
+
+class AnotherException : public std::exception
+{
+public:
+  const char* what() const noexcept override { return "AnotherException"; }
+};
+
+TEST(HttpRouterTest, ExceptionHandlerRegistrationAndDispatch)
+{
+  khttpd_fw::HttpRouter router;
+  bool handler_called = false;
+
+  class TestExceptionHandler : public khttpd_fw::ExceptionHandler<TestException>
+  {
+  public:
+    bool* called_ptr;
+
+    TestExceptionHandler(bool* called) : called_ptr(called)
+    {
+    }
+
+    void handle(const TestException& e, khttpd_fw::HttpContext& ctx) override
+    {
+      *called_ptr = true;
+      ctx.set_status(http::status::bad_request);
+      ctx.set_body(e.what());
+    }
+  };
+
+  router.add_exception_handler(std::make_shared<TestExceptionHandler>(&handler_called));
+
+  http::request<http::string_body> req;
+  http::response<http::string_body> res;
+  khttpd_fw::HttpContext ctx(req, res);
+
+  TestException ex("Something went wrong");
+  router.handle_exception(std::make_exception_ptr(ex), ctx);
+
+  ASSERT_TRUE(handler_called);
+  ASSERT_EQ(ctx.get_response().result(), http::status::bad_request);
+  ASSERT_EQ(ctx.get_response().body(), "Something went wrong");
+}
+
+TEST(HttpRouterTest, UnhandledExceptionFallback)
+{
+  khttpd_fw::HttpRouter router;
+
+  http::request<http::string_body> req;
+  http::response<http::string_body> res;
+  khttpd_fw::HttpContext ctx(req, res);
+
+  AnotherException ex;
+  // Should use default handler (500)
+  router.handle_exception(std::make_exception_ptr(ex), ctx);
+
+  ASSERT_EQ(ctx.get_response().result(), http::status::internal_server_error);
+}
+
+TEST(HttpRouterTest, ExceptionDispatcherTest)
+{
+  khttpd_fw::HttpRouter router;
+  auto dispatcher = std::make_shared<khttpd_fw::ExceptionDispatcher>();
+
+  bool int_handled = false;
+  bool str_handled = false;
+  bool runtime_handled = false;
+
+  dispatcher->on<int>([&](const int& e, khttpd_fw::HttpContext& ctx) {
+      int_handled = true;
+      ctx.set_body(std::to_string(e));
+  });
+
+  dispatcher->on<const char*>([&](const char* const& e, khttpd_fw::HttpContext& ctx) {
+      str_handled = true;
+      ctx.set_body(std::string("String: ") + e);
+  });
+  
+  dispatcher->on<std::runtime_error>([&](const std::runtime_error& e, khttpd_fw::HttpContext& ctx) {
+      runtime_handled = true;
+      ctx.set_body(std::string("Runtime: ") + e.what());
+  });
+
+  router.add_exception_handler(dispatcher);
+
+  // Test int
+  {
+      http::request<http::string_body> req;
+      http::response<http::string_body> res;
+      khttpd_fw::HttpContext ctx(req, res);
+      router.handle_exception(std::make_exception_ptr(123), ctx);
+      ASSERT_TRUE(int_handled);
+      ASSERT_EQ(ctx.get_response().body(), "123");
+  }
+
+  // Test const char*
+  {
+      http::request<http::string_body> req;
+      http::response<http::string_body> res;
+      khttpd_fw::HttpContext ctx(req, res);
+      try {
+          throw "test_error";
+      } catch (...) {
+          router.handle_exception(std::current_exception(), ctx);
+      }
+      ASSERT_TRUE(str_handled);
+      ASSERT_EQ(ctx.get_response().body(), "String: test_error");
+  }
+  
+  // Test runtime_error
+  {
+      http::request<http::string_body> req;
+      http::response<http::string_body> res;
+      khttpd_fw::HttpContext ctx(req, res);
+      router.handle_exception(std::make_exception_ptr(std::runtime_error("oops")), ctx);
+      ASSERT_TRUE(runtime_handled);
+      ASSERT_EQ(ctx.get_response().body(), "Runtime: oops");
+  }
+}
+
+TEST(HttpRouterTest, CustomUnknownExceptionHandler)
+{
+  khttpd_fw::HttpRouter router;
+  bool called = false;
+
+  router.set_unknown_exception_handler([&](khttpd_fw::HttpContext& ctx)
+  {
+    called = true;
+    ctx.set_status(http::status::service_unavailable);
+  });
+
+  http::request<http::string_body> req;
+  http::response<http::string_body> res;
+  khttpd_fw::HttpContext ctx(req, res);
+
+  router.handle_unknown_exception(ctx);
+
+  ASSERT_TRUE(called);
+  ASSERT_EQ(ctx.get_response().result(), http::status::service_unavailable);
 }
 
 // --- WebSocket Router Tests ---

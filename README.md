@@ -27,3 +27,40 @@
 4. create you code like [example](example)
 5. run `bazel build //:your_target_name` to compile
 6. run `bazel run //:your_target_name` to execute
+
+## Exception Handling
+
+khttpd supports robust exception handling mechanisms. You can catch specific exceptions or handle all exceptions using `ExceptionDispatcher`.
+
+### Example
+
+```cpp
+#include "framework/server.hpp"
+#include "framework/exception/exception_handler.hpp"
+
+// ... inside your main function ...
+
+// Create a dispatcher
+auto dispatcher = std::make_shared<khttpd::framework::ExceptionDispatcher>();
+
+// Register handler for integer exceptions (e.g., throw 404;)
+dispatcher->on<int>([](const int& e, khttpd::framework::HttpContext& ctx) {
+    ctx.set_status(boost::beast::http::status::internal_server_error);
+    ctx.set_body("Internal Error Code: " + std::to_string(e));
+});
+
+// Register handler for standard exceptions
+dispatcher->on<std::runtime_error>([](const std::runtime_error& e, khttpd::framework::HttpContext& ctx) {
+    ctx.set_status(boost::beast::http::status::internal_server_error);
+    ctx.set_body(std::string("Runtime Error: ") + e.what());
+});
+
+// Register handler for string literals
+dispatcher->on<const char*>([](const char* const& e, khttpd::framework::HttpContext& ctx) {
+    ctx.set_status(boost::beast::http::status::bad_request);
+    ctx.set_body(std::string("Error: ") + e);
+});
+
+// Add the dispatcher to the router
+server.get_http_router().add_exception_handler(dispatcher);
+```
