@@ -284,7 +284,7 @@ namespace khttpd::framework
     {
         // Fall through to unknown exception handler
     }
-    
+
     handle_unknown_exception(ctx);
   }
 
