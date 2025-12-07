@@ -71,7 +71,7 @@ namespace khttpd::framework
     template <class T>
     void set_body_json(T const& t, boost::json::serialize_options const& opts = {})
     {
-      set_body(boost::json::serialize(t), opts);
+      set_body(boost::json::serialize(t, opts));
     }
 
     template <class T>
