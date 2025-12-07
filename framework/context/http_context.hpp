@@ -40,6 +40,8 @@ namespace khttpd::framework
     std::optional<std::string> get_path_param(const std::string& key) const;
     std::optional<std::string> get_header(boost::beast::string_view name) const;
     std::optional<std::string> get_header(boost::beast::http::field name) const;
+    std::optional<std::vector<std::string>> get_headers(boost::beast::string_view name) const;
+    std::optional<std::vector<std::string>> get_headers(boost::beast::http::field name) const;
 
     std::optional<boost::json::value> get_json() const;
     std::optional<std::string> get_form_param(const std::string& key) const;
@@ -64,29 +66,37 @@ namespace khttpd::framework
     void set_path_params(std::map<std::string, std::string> params) const;
 
     // Extended data for interceptors/handlers
-    void set_attribute(const std::string& key, std::any value) const {
-        extended_data_[key] = std::move(value);
+    void set_attribute(const std::string& key, std::any value) const
+    {
+      extended_data_[key] = std::move(value);
     }
 
-    std::any get_attribute(const std::string& key) const {
-        auto it = extended_data_.find(key);
-        if (it != extended_data_.end()) {
-            return it->second;
-        }
-        return {};
+    std::any get_attribute(const std::string& key) const
+    {
+      auto it = extended_data_.find(key);
+      if (it != extended_data_.end())
+      {
+        return it->second;
+      }
+      return {};
     }
 
-    template<typename T>
-    std::optional<T> get_attribute_as(const std::string& key) const {
-        auto it = extended_data_.find(key);
-        if (it != extended_data_.end()) {
-            try {
-                return std::any_cast<T>(it->second);
-            } catch (const std::bad_any_cast&) {
-                return std::nullopt;
-            }
+    template <typename T>
+    std::optional<T> get_attribute_as(const std::string& key) const
+    {
+      auto it = extended_data_.find(key);
+      if (it != extended_data_.end())
+      {
+        try
+        {
+          return std::any_cast<T>(it->second);
         }
-        return std::nullopt;
+        catch (const std::bad_any_cast&)
+        {
+          return std::nullopt;
+        }
+      }
+      return std::nullopt;
     }
 
   private:
