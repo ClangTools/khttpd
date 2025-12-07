@@ -21,6 +21,16 @@ namespace khttpd::framework
     std::string data;
   };
 
+  struct CookieOptions
+  {
+    int max_age = -1; // -1 means session cookie, 0 means delete
+    std::string path = "/";
+    std::string domain = "";
+    bool secure = false;
+    bool http_only = true;
+    std::string same_site = "Lax"; // Strict, Lax, None
+  };
+
 
   class HttpContext
   {
@@ -42,6 +52,11 @@ namespace khttpd::framework
     std::optional<std::string> get_header(boost::beast::http::field name) const;
     std::optional<std::vector<std::string>> get_headers(boost::beast::string_view name) const;
     std::optional<std::vector<std::string>> get_headers(boost::beast::http::field name) const;
+
+    // Cookie support
+    std::optional<std::string> get_cookie(const std::string& key) const;
+    std::vector<std::string> get_cookies(const std::string& key) const;
+    void set_cookie(const std::string& key, const std::string& value, const CookieOptions& options = {}) const;
 
     std::optional<boost::json::value> get_json() const;
     std::optional<std::string> get_form_param(const std::string& key) const;
@@ -119,6 +134,10 @@ namespace khttpd::framework
     HttpStreamHandler do_stream_chunk = nullptr;
 
     mutable std::map<std::string, std::any> extended_data_;
+
+    mutable std::map<std::string, std::vector<std::string>> cached_cookies_;
+    mutable bool cookies_parsed_ = false;
+    void parse_cookies() const;
 
     void parse_url_components() const;
     void parse_form_params() const;

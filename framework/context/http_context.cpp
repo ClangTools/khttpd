@@ -365,6 +365,103 @@ namespace khttpd::framework
     return nullptr; // or return std::optional<std::reference_wrapper<const std::vector<MultipartFile>>>
   }
 
+  void HttpContext::parse_cookies() const
+  {
+    if (cookies_parsed_)
+    {
+      return;
+    }
+
+    auto cookie_headers = get_headers(boost::beast::http::field::cookie);
+    if (!cookie_headers)
+    {
+      cookies_parsed_ = true;
+      return;
+    }
+
+    for (const auto& header_val : *cookie_headers)
+    {
+      std::string::size_type pos = 0;
+      while (pos < header_val.length())
+      {
+        auto end_pos = header_val.find(';', pos);
+        if (end_pos == std::string::npos)
+        {
+          end_pos = header_val.length();
+        }
+
+        std::string cookie_pair = header_val.substr(pos, end_pos - pos);
+        auto eq_pos = cookie_pair.find('=');
+        if (eq_pos != std::string::npos)
+        {
+          std::string key = trim(cookie_pair.substr(0, eq_pos));
+          std::string value = trim(cookie_pair.substr(eq_pos + 1));
+          cached_cookies_[key].push_back(value);
+        }
+
+        pos = end_pos + 1;
+      }
+    }
+    cookies_parsed_ = true;
+  }
+
+  std::optional<std::string> HttpContext::get_cookie(const std::string& key) const
+  {
+    parse_cookies();
+    if (auto it = cached_cookies_.find(key); it != cached_cookies_.end() && !it->second.empty())
+    {
+      return it->second.front();
+    }
+    return std::nullopt;
+  }
+
+  std::vector<std::string> HttpContext::get_cookies(const std::string& key) const
+  {
+    parse_cookies();
+    if (auto it = cached_cookies_.find(key); it != cached_cookies_.end())
+    {
+      return it->second;
+    }
+    return {};
+  }
+
+  void HttpContext::set_cookie(const std::string& key, const std::string& value, const CookieOptions& options) const
+  {
+    std::string cookie_str = key + "=" + value;
+
+    if (options.max_age >= 0)
+    {
+      cookie_str += "; Max-Age=" + std::to_string(options.max_age);
+    }
+
+    if (!options.domain.empty())
+    {
+      cookie_str += "; Domain=" + options.domain;
+    }
+
+    if (!options.path.empty())
+    {
+      cookie_str += "; Path=" + options.path;
+    }
+
+    if (options.secure)
+    {
+      cookie_str += "; Secure";
+    }
+
+    if (options.http_only)
+    {
+      cookie_str += "; HttpOnly";
+    }
+
+    if (!options.same_site.empty())
+    {
+      cookie_str += "; SameSite=" + options.same_site;
+    }
+
+    res_.insert(boost::beast::http::field::set_cookie, cookie_str);
+  }
+
 
   void HttpContext::set_status(const boost::beast::http::status status) const
   {

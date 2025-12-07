@@ -167,3 +167,74 @@ TEST(HttpContextTest, ResponseSetters)
   ASSERT_EQ(actual_res[http::field::content_type], "text/html");
   ASSERT_EQ(actual_res["X-Framework-Version"], "1.0");
 }
+
+TEST(HttpContextTest, Cookies)
+{
+  http::request<http::string_body> req = make_request(http::verb::get, "/");
+  req.set(http::field::cookie, "session_id=12345; user=alice");
+  req.insert(http::field::cookie, "theme=dark; user=bob"); // Multiple headers, multiple values for 'user'
+  http::response<http::string_body> res;
+  khttpd_fw::HttpContext ctx = create_context(req, res);
+
+  // Single value
+  ASSERT_TRUE(ctx.get_cookie("session_id").has_value());
+  ASSERT_EQ(ctx.get_cookie("session_id").value(), "12345");
+  ASSERT_EQ(ctx.get_cookie("theme").value(), "dark");
+
+  // Multiple values
+  auto users = ctx.get_cookies("user");
+  ASSERT_EQ(users.size(), 2);
+  // Order depends on header order usually, assuming alice first then bob
+  ASSERT_EQ(users[0], "alice");
+  ASSERT_EQ(users[1], "bob");
+
+  // Missing
+  ASSERT_FALSE(ctx.get_cookie("non_existent").has_value());
+  ASSERT_TRUE(ctx.get_cookies("non_existent").empty());
+}
+
+TEST(HttpContextTest, SetCookie)
+{
+  http::request<http::string_body> req = make_request(http::verb::get, "/");
+  http::response<http::string_body> res;
+  khttpd_fw::HttpContext ctx = create_context(req, res);
+
+  ctx.set_cookie("foo", "bar");
+  khttpd_fw::CookieOptions opts;
+  opts.max_age = 3600;
+  opts.http_only = true;
+  opts.secure = true;
+  opts.path = "/api";
+  opts.domain = "example.com";
+  opts.same_site = "Strict";
+  ctx.set_cookie("user", "123", opts);
+
+  auto& actual_res = ctx.get_response();
+  auto range = actual_res.equal_range(http::field::set_cookie);
+  std::vector<std::string> cookies;
+  for(auto it = range.first; it != range.second; ++it) {
+      cookies.emplace_back(it->value());
+  }
+
+  ASSERT_EQ(cookies.size(), 2);
+  
+  bool found_foo = false;
+  bool found_user = false;
+
+  for (const auto& c : cookies) {
+      if (c.find("foo=bar") != std::string::npos) {
+          found_foo = true;
+      }
+      if (c.find("user=123") != std::string::npos) {
+          found_user = true;
+          ASSERT_NE(c.find("Max-Age=3600"), std::string::npos);
+          ASSERT_NE(c.find("HttpOnly"), std::string::npos);
+          ASSERT_NE(c.find("Secure"), std::string::npos);
+          ASSERT_NE(c.find("Path=/api"), std::string::npos);
+          ASSERT_NE(c.find("Domain=example.com"), std::string::npos);
+          ASSERT_NE(c.find("SameSite=Strict"), std::string::npos);
+      }
+  }
+  ASSERT_TRUE(found_foo);
+  ASSERT_TRUE(found_user);
+}
