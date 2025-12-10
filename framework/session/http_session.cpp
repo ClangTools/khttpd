@@ -90,18 +90,17 @@ void HttpSession::handle_request()
       return;
     }
 
-    // 2. Dispatch to routes or static files
-    const auto flag = router_.dispatch(*ctx);
     bool static_file_served = false;
-
-    if (!flag)
+    // 2. Dispatch to routes or static files
+    router_.dispatch(*ctx, [this, &static_file_served]
     {
       // 处理 GET 请求以尝试服务静态文件
       if (req_.method() == http::verb::get || req_.method() == http::verb::head)
       {
         static_file_served = do_serve_static_file();
       }
-    }
+      return static_file_served;
+    });
 
     // If static file was served, the response is already sent.
     // We skip post-interceptors and explicit send_response.

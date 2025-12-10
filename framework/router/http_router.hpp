@@ -62,12 +62,12 @@ namespace khttpd::framework
     void handle_exception(std::exception_ptr eptr, HttpContext& ctx) const;
     void handle_unknown_exception(HttpContext& ctx) const;
 
-    bool dispatch(HttpContext& ctx) const;
+    bool dispatch(HttpContext& ctx, const std::function<bool()>& static_file_fun = nullptr) const;
 
   private:
     std::vector<RouteEntry> routes_;
     std::vector<std::shared_ptr<Interceptor>> interceptors_;
-    
+
     std::vector<std::shared_ptr<ExceptionHandlerBase>> exception_handlers_;
     UnknownExceptionHandler unknown_exception_handler_;
 

@@ -174,7 +174,7 @@ namespace khttpd::framework
     }
   }
 
-  bool HttpRouter::dispatch(HttpContext& ctx) const
+  bool HttpRouter::dispatch(HttpContext& ctx, const std::function<bool()>& static_file_fun) const
   {
     const std::string request_path = ctx.path();
     const boost::beast::http::verb request_method = ctx.method();
@@ -206,8 +206,12 @@ namespace khttpd::framework
       }
     }
 
-    handle_not_found(ctx);
-    return false;
+    if (!static_file_fun || !static_file_fun())
+    {
+      handle_not_found(ctx);
+      return false;
+    }
+    return true;
   }
 
   void HttpRouter::handle_not_found(HttpContext& ctx)
@@ -282,7 +286,7 @@ namespace khttpd::framework
     }
     catch (...)
     {
-        // Fall through to unknown exception handler
+      // Fall through to unknown exception handler
     }
 
     handle_unknown_exception(ctx);
