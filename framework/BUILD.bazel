@@ -9,6 +9,7 @@ cc_library(
         "session/*.cpp",
         "websocket/*.cpp",
         "context/*.cpp",
+        "client/*.cpp",
     ]),
     hdrs = glob([
         "*.hpp",
@@ -20,6 +21,7 @@ cc_library(
         "router/*.hpp",
         "session/*.hpp",
         "websocket/*.hpp",
+        "client/*.hpp",
     ]),
     copts = [
         "-std=c++17",
