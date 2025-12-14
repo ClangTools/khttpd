@@ -16,6 +16,7 @@ cc_library(
         "context/*.hpp",
         "controller/*.hpp",
         "exception/*.hpp",
+        "cron/*.hpp",
         "dto/*.hpp",
         "interceptor/*.hpp",
         "di/*.hpp",

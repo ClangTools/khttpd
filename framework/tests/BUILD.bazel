@@ -72,3 +72,18 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_test(
+    name = "cronjob_test",
+    srcs = ["cronjob_test.cpp"],
+    copts = [
+        "-std=c++17",
+        "-Wall",
+        "-pedantic",
+    ],
+    deps = [
+        "//framework",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
