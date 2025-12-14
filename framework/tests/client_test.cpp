@@ -2,176 +2,352 @@
 #include "framework/client/websocket_client.hpp"
 #include <gtest/gtest.h>
 #include <boost/json.hpp>
-#include <boost/asio/steady_timer.hpp>
 #include <map>
-#include <vector>
+#include <thread>
+#include <iostream>
 
 using namespace khttpd::framework::client;
+namespace http = boost::beast::http;
 
-// 1. 自定义结构体
-struct UserProfile
-{
-  int id;
-  std::string name;
-};
-
-// 为自定义结构体实现 tag_invoke 以支持 boost::json::value_from
-void tag_invoke(boost::json::value_from_tag, boost::json::value& jv, const UserProfile& u)
-{
-  jv = {{"id", u.id}, {"name", u.name}};
-}
-
-// 2. 类型别名 (解决宏参数逗号问题)
-using StringIntMap = std::map<std::string, int>;
-
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wvariadic-macro-arguments-omitted"
-#endif
-
-class TestApiClient : public HttpClient
+// ==========================================
+// 1. 定义 PostmanEchoClient 类
+// ==========================================
+class PostmanEchoClient : public HttpClient
 {
 public:
-  using HttpClient::HttpClient;
-
-  // Manual implementation
-  void get_user_manual(int id, ResponseCallback callback)
+  // 构造函数：注入 ioc，并设置默认 Base URL
+  PostmanEchoClient(boost::asio::io_context& ioc)
+    : HttpClient(ioc)
   {
-    std::map<std::string, std::string> query;
-    std::map<std::string, std::string> headers;
-    std::string body;
-    std::string path = "/users/" + std::to_string(id);
-    request(boost::beast::http::verb::get, path, query, body, headers, std::move(callback));
+    set_base_url("https://postman-echo.com");
+    // 设置一个较长的超时时间，防止 CI 环境网络慢
+    set_timeout(std::chrono::seconds(10));
   }
 
-  // Macro implementations
+  // ------------------------------------------------------------------
+  // API 定义
+  // ------------------------------------------------------------------
 
-  // 基本类型
-  API_CALL(http::verb::get, "/users/:id", get_user, PATH(int, id), QUERY(std::string, details, "d"))
+  // 1. GET 请求，带查询参数
+  // Endpoint: /get?foo=bar
+  API_CALL(http::verb::get, "/get", echo_get,
+           QUERY(std::string, foo_val, "foo"),
+           QUERY(int, id_val, "id"))
 
-  // Boost.JSON 对象
-  API_CALL(http::verb::post, "/items", create_item, BODY(boost::json::object, item_json))
+  // 2. POST 请求，带 JSON Body
+  // Endpoint: /post
+  API_CALL(http::verb::post, "/post", echo_post,
+           BODY(boost::json::object, json_body))
 
-  // STL Map (使用别名)
-  API_CALL(http::verb::post, "/config", update_config, BODY(StringIntMap, config))
+  // 3. GET 请求，测试 Header 传递
+  // Endpoint: /headers
+  // 我们定义一个名为 request_id 的参数，它会被映射为 HTTP Header "X-Request-Id"
+  API_CALL(http::verb::get, "/headers", echo_headers,
+           HEADER(std::string, request_id, "X-My-Request-Id"),
+           HEADER(std::string, user_token, "X-User-Token"))
 
-  // 自定义结构体
-  API_CALL(http::verb::put, "/profile", update_profile, BODY(UserProfile, profile))
-
-  API_CALL(http::verb::get, "/simple", get_simple)
+  // 4. PUT 请求，带路径参数
+  // Endpoint: /put (Postman echo 实际上忽略路径后的东西，但我们可以测试 URL 拼接)
+  API_CALL(http::verb::put, "/put", echo_put_dummy)
 };
 
-#if defined(__clang__)
-#pragma clang diagnostic pop
-#endif
+// ==========================================
+// 2. 测试用例
+// ==========================================
 
-TEST(ClientBaseTest, CompilationCheck)
+class ClientTest : public ::testing::Test
 {
+protected:
   boost::asio::io_context ioc;
-  auto client = std::make_shared<TestApiClient>(ioc);
-  EXPECT_TRUE(client != nullptr);
+  std::shared_ptr<PostmanEchoClient> client;
 
-  // Check if methods exist (compile-time check mainly)
-
-  // 1. Basic
-  client->get_user(123, "full", [](auto ec, auto res)
+  // 辅助：用于在主线程等待异步结果
+  void run_until_complete()
   {
-  });
+    ioc.run();
+    ioc.restart(); // 重置以便下次使用
+  }
 
-  // 2. Boost.JSON Object
-  boost::json::object obj;
-  obj["foo"] = "bar";
-  client->create_item(obj, [](auto ec, auto res)
+  void SetUp() override
   {
-  });
+    client = std::make_shared<PostmanEchoClient>(ioc);
+  }
+};
 
-  // 3. STL Map
-  StringIntMap config;
-  config["timeout"] = 100;
-  client->update_config(config, [](auto ec, auto res)
-  {
-  });
-
-  // 4. Custom Struct
-  UserProfile profile{1, "Alice"};
-  client->update_profile(profile, [](auto ec, auto res)
-  {
-  });
-
-  // 5. No args
-  client->get_simple([](auto ec, auto res)
-  {
-  });
-}
-
-TEST(ClientHelperTest, ReplaceAll)
+// 测试 1: GET Query 参数
+TEST_F(ClientTest, GetWithQueryParams)
 {
-  std::string s = "/users/:id/posts/:post_id";
-  s = replace_all(s, ":id", "123");
-  EXPECT_EQ(s, "/users/123/posts/:post_id");
-  s = replace_all(s, ":post_id", "456");
-  EXPECT_EQ(s, "/users/123/posts/456");
-}
-
-TEST(RealHttpClientTest, GetRequest)
-{
-  boost::asio::io_context ioc;
-  auto client = std::make_shared<HttpClient>(ioc);
   bool done = false;
 
-  // Switch to postman-echo.com
-  client->request(boost::beast::http::verb::get, "http://postman-echo.com/get", {}, "", {},
-    [&](boost::beast::error_code ec, boost::beast::http::response<boost::beast::http::string_body> res) {
-      if (!ec)
-      {
-        EXPECT_EQ(res.result(), boost::beast::http::status::ok);
-        auto body = res.body();
-        EXPECT_TRUE(body.find("url") != std::string::npos) << "Response body missing 'url': " << body;
-      }
-      else
-      {
-        std::cerr << "RealHttpClientTest.GetRequest network error: " << ec.message() << std::endl;
-      }
-      done = true;
-    });
+  // 调用: /get?foo=hello&id=123
+  client->echo_get("hello", 123, [&](auto ec, auto res)
+  {
+    if (!ec)
+    {
+      EXPECT_EQ(res.result(), http::status::ok);
+      std::string body = res.body();
+      // 验证 Postman Echo 返回的 args json
+      EXPECT_TRUE(body.find("\"foo\":\"hello\"") != std::string::npos) << "Body: " << body;
+      EXPECT_TRUE(body.find("\"id\":\"123\"") != std::string::npos) << "Body: " << body;
+    }
+    else
+    {
+      ADD_FAILURE() << "Network error: " << ec.message();
+    }
+    done = true;
+  });
 
-  ioc.run();
+  run_until_complete();
   EXPECT_TRUE(done);
 }
 
-TEST(RealHttpClientTest, PostRequest)
+// 测试 2: POST JSON Body
+TEST_F(ClientTest, PostJsonBody)
 {
-  boost::asio::io_context ioc;
-  auto client = std::make_shared<HttpClient>(ioc);
   bool done = false;
-  std::string payload = "{\"hello\": \"world\"}";
+  boost::json::object jv;
+  jv["message"] = "test_payload";
+  jv["count"] = 99;
 
-  client->request(boost::beast::http::verb::post, "http://postman-echo.com/post", {}, payload, 
-    {{"Content-Type", "application/json"}},
-    [&](boost::beast::error_code ec, boost::beast::http::response<boost::beast::http::string_body> res) {
-      if (!ec)
-      {
-        EXPECT_EQ(res.result(), boost::beast::http::status::ok);
-        auto body = res.body();
-        // postman-echo puts body in 'data' or 'json'
-        EXPECT_TRUE(body.find("hello") != std::string::npos) << "Response body missing posted data: " << body;
-      }
-      else
-      {
-        std::cerr << "RealHttpClientTest.PostRequest network error: " << ec.message() << std::endl;
-      }
-      done = true;
-    });
+  client->echo_post(jv, [&](auto ec, auto res)
+  {
+    if (!ec)
+    {
+      EXPECT_EQ(res.result(), http::status::ok);
+      std::string body = res.body();
+      // 验证 data 字段
+      EXPECT_TRUE(body.find("test_payload") != std::string::npos) << "Body: " << body;
+      EXPECT_TRUE(body.find("99") != std::string::npos) << "Body: " << body;
+    }
+    else
+    {
+      ADD_FAILURE() << "Network error: " << ec.message();
+    }
+    done = true;
+  });
 
-  ioc.run();
+  run_until_complete();
   EXPECT_TRUE(done);
 }
 
-TEST(WebsocketClientTest, Lifecycle)
+// 测试 3: Headers 传递
+TEST_F(ClientTest, CustomHeaders)
 {
+  bool done = false;
+  std::string rid = "req-unique-id-001";
+  std::string token = "secret-token-abc";
+
+  // 传递 Header 参数
+  client->echo_headers(rid, token, [&](auto ec, auto res)
+  {
+    if (!ec)
+    {
+      EXPECT_EQ(res.result(), http::status::ok);
+      std::string body = res.body();
+
+      // Postman Echo 返回的 headers key 都是小写的
+      // 注意：这里要匹配小写，因为 HTTP/2 或部分 HTTP/1.x 实现会将 header key 规范化为小写
+      bool has_rid = body.find("x-my-request-id") != std::string::npos ||
+        body.find("X-My-Request-Id") != std::string::npos;
+
+      bool has_val = body.find(rid) != std::string::npos;
+
+      bool has_token = body.find("secret-token-abc") != std::string::npos;
+
+      if (!has_rid || !has_val || !has_token)
+      {
+        std::cerr << ">>> TEST FAILURE DEBUG INFO <<<" << std::endl;
+        std::cerr << "Expected Value: " << rid << std::endl;
+        std::cerr << "Actual Response Body: \n" << body << std::endl;
+      }
+
+      EXPECT_TRUE(has_rid) << "Missing Header Key: X-My-Request-Id";
+      EXPECT_TRUE(has_val) << "Missing Header Value: " << rid;
+      EXPECT_TRUE(has_token) << "Missing X-User-Token value";
+    }
+    else
+    {
+      ADD_FAILURE() << "Network error: " << ec.message();
+    }
+    done = true;
+  });
+
+  run_until_complete();
+  EXPECT_TRUE(done);
+}
+
+// 测试 4: Sync 同步调用 (带 Base URL)
+TEST_F(ClientTest, SyncCall)
+{
+  // 重要：同步调用会阻塞当前线程等待 future，
+  // 所以 io_context 必须在另一个线程跑，否则死锁。
+  auto work = boost::asio::make_work_guard(ioc);
+  std::thread ioc_thread([&]
+  {
+    ioc.run();
+  });
+
+  try
+  {
+    // 使用同步生成的 API
+    auto res = client->echo_get_sync("sync_world", 999);
+
+    EXPECT_EQ(res.result(), http::status::ok);
+    std::string body = res.body();
+    EXPECT_TRUE(body.find("sync_world") != std::string::npos);
+  }
+  catch (const std::exception& e)
+  {
+    ADD_FAILURE() << "Sync request exception: " << e.what();
+  }
+
+  // 清理
+  work.reset();
+  ioc.stop();
+  if (ioc_thread.joinable()) ioc_thread.join();
+}
+
+// 测试 5: 全局默认 Header
+TEST_F(ClientTest, GlobalDefaultHeader)
+{
+  bool done = false;
+  // 设置一个全局 Header，所有请求都应该带上
+  client->set_default_header("X-App-Version", "v1.0.0-beta");
+
+  // 复用 echo_headers 接口，参数传空字符串看看默认 header 是否还在
+  client->echo_headers("id-1", "token-1", [&](auto ec, auto res)
+  {
+    if (!ec)
+    {
+      std::string body = res.body();
+      // 检查全局 Header 是否被服务器收到
+      EXPECT_TRUE(body.find("v1.0.0-beta") != std::string::npos)
+                << "Global default header missing in: " << body;
+    }
+    done = true;
+  });
+
+  run_until_complete();
+  EXPECT_TRUE(done);
+}
+
+// ==========================================
+// WebSocket 测试
+// ==========================================
+
+// ==========================================
+// WebSocket 测试
+// ==========================================
+
+class WebsocketTest : public ::testing::Test
+{
+protected:
   boost::asio::io_context ioc;
-  auto client = std::make_shared<WebsocketClient>(ioc);
-  EXPECT_TRUE(client != nullptr);
-  // Real connection tests are flaky due to external server dependencies and potential Beast assertion issues in this environment.
-  // We verified HttpClient works against postman-echo.com.
+  std::shared_ptr<WebsocketClient> ws_client;
+
+  void SetUp() override
+  {
+    ws_client = std::make_shared<WebsocketClient>(ioc);
+  }
+
+  void TearDown() override
+  {
+    if (ws_client) ws_client->close();
+  }
+};
+
+TEST_F(WebsocketTest, WssEchoAndWriteQueue)
+{
+  std::string url = "wss://echo.websocket.org";
+
+  const int message_count = 5;
+  int received_count = 0;
+  bool closed_gracefully = false;
+
+  // 增加一个 flag 标记是否发生严重错误
+  bool has_error = false;
+
+  // 创建定时器，但先不 async_wait，后面逻辑控制
+  boost::asio::steady_timer timer(ioc, std::chrono::seconds(15));
+
+  ws_client->set_on_message([&](const std::string& msg)
+  {
+    // 过滤欢迎消息
+    if (msg.find("Request served by") != std::string::npos) return;
+
+    received_count++;
+    // std::cout << "Msg: " << msg << std::endl;
+
+    if (received_count >= message_count)
+    {
+      ws_client->close();
+    }
+  });
+
+  ws_client->set_on_close([&]()
+  {
+    closed_gracefully = true;
+    // 关键：连接关闭后，取消定时器，ioc.run() 就会立即返回
+    timer.cancel();
+  });
+
+  ws_client->set_on_error([&](boost::beast::error_code ec)
+  {
+    // 忽略操作取消（通常是 close() 导致的 pending read 取消）
+    if (ec == boost::asio::error::operation_aborted) return;
+
+    std::cerr << "WS Error: " << ec.message() << std::endl;
+    has_error = true;
+    timer.cancel(); // 发生错误也停止测试
+  });
+
+  ws_client->connect(url, [&](boost::beast::error_code ec)
+  {
+    if (ec)
+    {
+      ADD_FAILURE() << "WS Connect Failed: " << ec.message();
+      timer.cancel();
+      return;
+    }
+
+    for (int i = 0; i < message_count; ++i)
+    {
+      ws_client->send("Msg-" + std::to_string(i));
+    }
+  });
+
+  // 启动超时计时
+  timer.async_wait([&](boost::system::error_code ec)
+  {
+    if (ec == boost::asio::error::operation_aborted)
+    {
+      // 定时器被取消，说明测试正常结束或提前出错
+      return;
+    }
+    // 定时器真的触发了 -> 超时
+    ws_client->close();
+    ADD_FAILURE() << "Test Timed Out! Received: " << received_count << "/" << message_count;
+  });
+
+  ioc.run();
+
+  EXPECT_FALSE(has_error) << "Should not encounter network errors";
+  EXPECT_EQ(received_count, message_count);
+  EXPECT_TRUE(closed_gracefully) << "on_close should be triggered";
+}
+
+TEST_F(WebsocketTest, ConnectFailure)
+{
+  // 测试连接不可达端口
+  bool failed = false;
+  ws_client->connect("ws://localhost:59999", [&](boost::beast::error_code ec)
+  {
+    if (ec)
+    {
+      failed = true;
+    }
+  });
+
+  ioc.run();
+  EXPECT_TRUE(failed);
 }

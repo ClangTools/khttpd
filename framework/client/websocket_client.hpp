@@ -3,19 +3,28 @@
 
 #include <boost/beast/core.hpp>
 #include <boost/beast/websocket.hpp>
+#include <boost/beast/ssl.hpp>
 #include <boost/asio/strand.hpp>
 #include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/ssl.hpp>
+
 #include <functional>
 #include <memory>
 #include <string>
 #include <vector>
+#include <map>
+#include <deque>
 
 namespace khttpd::framework::client
 {
   namespace beast = boost::beast;
   namespace websocket = beast::websocket;
   namespace net = boost::asio;
+  namespace ssl = boost::asio::ssl;
   using tcp = boost::asio::ip::tcp;
+
+  // 前置声明内部会话接口
+  struct WebsocketSessionImpl;
 
   class WebsocketClient : public std::enable_shared_from_this<WebsocketClient>
   {
@@ -25,36 +34,44 @@ namespace khttpd::framework::client
     using ErrorHandler = std::function<void(beast::error_code)>;
     using CloseHandler = std::function<void()>;
 
+    // 构造函数：支持默认 SSL 或 外部 SSL Context
     explicit WebsocketClient(net::io_context& ioc);
+    WebsocketClient(net::io_context& ioc, ssl::context& ssl_ctx);
+    ~WebsocketClient();
 
+    // 连接 URL (支持 ws:// 和 wss://)
     void connect(const std::string& url, ConnectCallback callback);
+
+    // 发送消息 (线程安全，支持并发调用)
     void send(const std::string& message);
+
+    // 关闭连接
     void close();
 
+    // 配置
+    void set_header(const std::string& key, const std::string& value);
     void set_on_message(MessageHandler handler);
     void set_on_error(ErrorHandler handler);
     void set_on_close(CloseHandler handler);
 
   private:
-    websocket::stream<beast::tcp_stream> ws_;
-    tcp::resolver resolver_;
-    std::string host_;
-    beast::flat_buffer buffer_;
+    friend WebsocketSessionImpl;
+    net::io_context& ioc_;
 
-    ConnectCallback connect_callback_;
+    // SSL Context Management
+    std::shared_ptr<ssl::context> own_ssl_ctx_;
+    ssl::context* ssl_ctx_ptr_;
+
+    // Callbacks
     MessageHandler on_message_;
     ErrorHandler on_error_;
     CloseHandler on_close_;
 
-    void on_resolve(beast::error_code ec, tcp::resolver::results_type results);
-    void on_connect(beast::error_code ec, tcp::resolver::results_type::endpoint_type ep);
-    void on_handshake(beast::error_code ec);
+    // Headers to send during handshake
+    std::map<std::string, std::string> headers_;
 
-    void do_read();
-    void on_read(beast::error_code ec, std::size_t bytes_transferred);
-
-    void on_write(beast::error_code ec, std::size_t bytes_transferred);
-    void on_close(beast::error_code ec);
+    // 多态的内部会话 (持有实际的 websocket stream)
+    std::shared_ptr<WebsocketSessionImpl> session_;
   };
 }
 

@@ -1,21 +1,12 @@
 #include "http_client.hpp"
-#include <boost/beast/core.hpp>
-#include <boost/beast/http.hpp>
-#include <boost/beast/version.hpp>
 #include <boost/asio/connect.hpp>
-#include <boost/asio/ip/tcp.hpp>
-#include <fmt/core.h>
 #include <iostream>
 
 namespace khttpd::framework::client
 {
-  namespace beast = boost::beast;
-  namespace http = beast::http;
-  namespace net = boost::asio;
-  using tcp = boost::asio::ip::tcp;
-
   std::string replace_all(std::string str, const std::string& from, const std::string& to)
   {
+    if (from.empty()) return str;
     size_t start_pos = 0;
     while ((start_pos = str.find(from, start_pos)) != std::string::npos)
     {
@@ -25,303 +16,345 @@ namespace khttpd::framework::client
     return str;
   }
 
-
-  HttpClient::HttpClient(net::io_context& ioc)
-    : ioc_(ioc), resolver_(ioc)
-  {
-  }
-
-  std::string HttpClient::build_target(const std::string& path, const std::map<std::string, std::string>& query_params)
-  {
-    if (query_params.empty())
-    {
-      return path;
-    }
-
-    boost::urls::url u = boost::urls::parse_relative_ref(path).value();
-    for (const auto& [key, value] : query_params)
-    {
-      u.params().append({key, value});
-    }
-    return u.buffer();
-  }
-
-  void HttpClient::request(http::verb method,
-                           const std::string& path,
-                           const std::map<std::string, std::string>& query_params,
-                           const std::string& body,
-                           const std::map<std::string, std::string>& headers,
-                           ResponseCallback callback)
-  {
-    // Parse host and port from path if it's an absolute URL,
-    // OR assume the client should have a base URL?
-    // The macro interface `API_CALL` uses `PATH_TEMPLATE` which usually implies relative path.
-    // However, `request` needs to know WHERE to connect.
-    //
-    // DESIGN DECISION:
-    // The `HttpClient` provided here seems to be stateless regarding "Server Address" in the class itself.
-    // It's common for a Client to be bound to a base URL, or for the request to provide full URL.
-    //
-    // If `path` is absolute (http://...), we parse it.
-    // If `path` is relative, we currently don't have a configured host/port in HttpClient.
-    //
-    // Update: I will modify HttpClient to accept a base_url in constructor OR assume path is full URL.
-    // Given the usage `API_CALL("GET", "/users", ...)` implies relative path.
-    // I will assume for now that the path provided MIGHT be absolute, or we need a way to set host.
-    //
-    // BUT, `request` signature expects just `path`.
-    // I will assume `path` MUST be a full URL for now if no base is set.
-    // Or better: Let's extract host/port from the URL.
-
-    std::string url_str = path;
-    // If query params exist, we need to append them.
-    // But if `path` is full URL, `build_target` using `parse_relative_ref` might fail or be wrong.
-
-    // Let's use boost::urls::url to parse the input path/url.
-    auto url_result = boost::urls::parse_uri(path);
-    if (!url_result.has_value())
-    {
-      // Try relative?
-      // If it's relative, we can't connect without a host.
-      // We will fail if host is missing.
-      // UNLESS we allow setting a default host in HttpClient.
-      // For this implementation, I'll enforce absolute URL in `path` OR I'll add a `base_url` field?
-      // The prompt didn't specify base_url. I'll add `host` and `port` to `HttpClient`?
-      //
-      // Let's assume the user provides a full URL in the path for the `API_CALL`,
-      // e.g. `API_CALL("GET", "http://localhost:8080/users", ...)`
-      // Or `API_CALL("GET", "/users", ...)` and the client has a base URL.
-      //
-      // I'll add `base_url` to `HttpClient` constructor to make it useful.
-
-      // Wait, I can't change the constructor easily without breaking existing code (none yet).
-      // I'll add `set_base_url` or overload constructor.
-    }
-
-    // Quick fix: Assume path is full URL.
-    boost::urls::url_view u;
-    boost::urls::url buffer_url;
-
-    if (url_result.has_value())
-    {
-      u = url_result.value();
-    }
-    else
-    {
-      // Maybe it's just a path?
-      // We need a host.
-      auto res = boost::urls::parse_uri_reference(path);
-      if (res.has_value())
-      {
-        u = res.value();
-      }
-      else
-      {
-        if (callback) callback(beast::error_code(beast::http::error::bad_target), {});
-        return;
-      }
-    }
-
-    std::string host = u.host();
-    std::string port = u.port();
-    if (port.empty())
-    {
-      port = (u.scheme() == "https") ? "443" : "80";
-    }
-
-    // Construct target (path + query)
-    if (!query_params.empty())
-    {
-      buffer_url = u;
-      for (auto& p : query_params)
-      {
-        buffer_url.params().append({p.first, p.second});
-      }
-      u = buffer_url;
-    }
-
-    std::string target = std::string(u.encoded_path());
-    if (target.empty()) target = "/";
-    if (u.has_query())
-    {
-      target += "?" + std::string(u.encoded_query());
-    }
-
-    raw_request(method, host, port, target, body, headers, std::move(callback));
-  }
-
-  // Helper class to keep the session alive during async operation
+  // ==========================================
+  // Abstract Session to handle common logic
+  // ==========================================
   class Session : public std::enable_shared_from_this<Session>
   {
-    tcp::resolver resolver_;
-    beast::tcp_stream stream_;
-    beast::flat_buffer buffer_;
+  protected:
+    HttpClient::ResponseCallback callback_;
     http::request<http::string_body> req_;
     http::response<http::string_body> res_;
-    HttpClient::ResponseCallback callback_;
+    beast::flat_buffer buffer_;
+    std::chrono::seconds timeout_;
 
   public:
-    Session(net::io_context& ioc, HttpClient::ResponseCallback callback)
-      : resolver_(ioc), stream_(ioc), callback_(std::move(callback))
+    Session(HttpClient::ResponseCallback callback, std::chrono::seconds timeout)
+      : callback_(std::move(callback)), timeout_(timeout)
     {
     }
 
-    void run(const std::string& host, const std::string& port, http::request<http::string_body> req)
+    virtual ~Session() = default;
+    virtual void run(const std::string& host, const std::string& port, http::request<http::string_body> req) = 0;
+
+  protected:
+    void on_fail(beast::error_code ec, const char* what)
+    {
+      // Log if needed: std::cerr << what << ": " << ec.message() << "\n";
+      if (callback_) callback_(ec, {});
+    }
+  };
+
+  // ==========================================
+  // Plain HTTP Session
+  // ==========================================
+  class HttpSession : public Session
+  {
+    beast::tcp_stream stream_;
+    tcp::resolver resolver_;
+
+    // Helper: Downcast shared_from_this to avoid template deduction errors
+    std::shared_ptr<HttpSession> get_shared()
+    {
+      return std::static_pointer_cast<HttpSession>(shared_from_this());
+    }
+
+  public:
+    HttpSession(net::io_context& ioc, HttpClient::ResponseCallback cb, std::chrono::seconds timeout)
+      : Session(std::move(cb), timeout), stream_(ioc), resolver_(ioc)
+    {
+    }
+
+    void run(const std::string& host, const std::string& port, http::request<http::string_body> req) override
     {
       req_ = std::move(req);
+      stream_.expires_after(timeout_);
       resolver_.async_resolve(host, port,
-                              beast::bind_front_handler(&Session::on_resolve, shared_from_this()));
+                              beast::bind_front_handler(&HttpSession::on_resolve, get_shared()));
     }
 
     void on_resolve(beast::error_code ec, tcp::resolver::results_type results)
     {
-      if (ec) return callback_(ec, {});
-
+      if (ec) return on_fail(ec, "resolve");
+      stream_.expires_after(timeout_);
       stream_.async_connect(results,
-                            beast::bind_front_handler(&Session::on_connect, shared_from_this()));
+                            beast::bind_front_handler(&HttpSession::on_connect, get_shared()));
     }
 
     void on_connect(beast::error_code ec, tcp::resolver::results_type::endpoint_type)
     {
-      if (ec) return callback_(ec, {});
-
+      if (ec) return on_fail(ec, "connect");
+      stream_.expires_after(timeout_);
       http::async_write(stream_, req_,
-                        beast::bind_front_handler(&Session::on_write, shared_from_this()));
+                        beast::bind_front_handler(&HttpSession::on_write, get_shared()));
     }
 
     void on_write(beast::error_code ec, std::size_t bytes_transferred)
     {
       boost::ignore_unused(bytes_transferred);
-      if (ec) return callback_(ec, {});
+      if (ec) return on_fail(ec, "write");
 
       http::async_read(stream_, buffer_, res_,
-                       beast::bind_front_handler(&Session::on_read, shared_from_this()));
+                       beast::bind_front_handler(&HttpSession::on_read, get_shared()));
     }
 
     void on_read(beast::error_code ec, std::size_t bytes_transferred)
     {
       boost::ignore_unused(bytes_transferred);
-      if (ec) return callback_(ec, {});
+      if (ec) return on_fail(ec, "read");
 
-      // Gracefully close the socket
-      beast::error_code ec_shutdown;
-      stream_.socket().shutdown(tcp::socket::shutdown_both, ec_shutdown);
-
-      // invoke callback
-      callback_(ec, std::move(res_));
+      stream_.socket().shutdown(tcp::socket::shutdown_both, ec);
+      if (callback_) callback_(ec, std::move(res_));
     }
   };
 
-  void HttpClient::raw_request(http::verb method,
-                               const std::string& host,
-                               const std::string& port,
-                               const std::string& target,
-                               const std::string& body,
-                               const std::map<std::string, std::string>& headers,
-                               ResponseCallback callback)
+  // ==========================================
+  // HTTPS Session
+  // ==========================================
+  class HttpsSession : public Session
   {
-    // Set up request
-    http::request<http::string_body> req{method, target, 11};
-    req.set(http::field::host, host);
-    req.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
+    beast::ssl_stream<beast::tcp_stream> stream_;
+    tcp::resolver resolver_;
 
-    for (const auto& h : headers)
+    std::shared_ptr<HttpsSession> get_shared()
     {
-      req.set(h.first, h.second);
+      return std::static_pointer_cast<HttpsSession>(shared_from_this());
     }
 
-    if (!body.empty())
+  public:
+    HttpsSession(net::io_context& ioc, ssl::context& ctx, HttpClient::ResponseCallback cb, std::chrono::seconds timeout)
+      : Session(std::move(cb), timeout), stream_(ioc, ctx), resolver_(ioc)
     {
-      req.body() = body;
-      req.prepare_payload();
     }
 
-    // Launch session
-    std::make_shared<Session>(ioc_, std::move(callback))->run(host, port, std::move(req));
+    void run(const std::string& host, const std::string& port, http::request<http::string_body> req) override
+    {
+      req_ = std::move(req);
+      if (!SSL_set_tlsext_host_name(stream_.native_handle(), host.c_str()))
+      {
+        beast::error_code ec{static_cast<int>(::ERR_get_error()), net::error::get_ssl_category()};
+        return on_fail(ec, "ssl_setup");
+      }
+
+      stream_.next_layer().expires_after(timeout_);
+      resolver_.async_resolve(host, port,
+                              beast::bind_front_handler(&HttpsSession::on_resolve, get_shared()));
+    }
+
+    void on_resolve(beast::error_code ec, tcp::resolver::results_type results)
+    {
+      if (ec) return on_fail(ec, "resolve");
+      stream_.next_layer().expires_after(timeout_);
+      beast::get_lowest_layer(stream_).async_connect(results,
+                                                     beast::bind_front_handler(
+                                                       &HttpsSession::on_connect, get_shared()));
+    }
+
+    void on_connect(beast::error_code ec, tcp::resolver::results_type::endpoint_type)
+    {
+      if (ec) return on_fail(ec, "connect");
+      stream_.next_layer().expires_after(timeout_);
+      stream_.async_handshake(ssl::stream_base::client,
+                              beast::bind_front_handler(&HttpsSession::on_handshake, get_shared()));
+    }
+
+    void on_handshake(beast::error_code ec)
+    {
+      if (ec) return on_fail(ec, "handshake");
+      stream_.next_layer().expires_after(timeout_);
+      http::async_write(stream_, req_,
+                        beast::bind_front_handler(&HttpsSession::on_write, get_shared()));
+    }
+
+    void on_write(beast::error_code ec, std::size_t bytes_transferred)
+    {
+      boost::ignore_unused(bytes_transferred);
+      if (ec) return on_fail(ec, "write");
+      http::async_read(stream_, buffer_, res_,
+                       beast::bind_front_handler(&HttpsSession::on_read, get_shared()));
+    }
+
+    void on_read(beast::error_code ec, std::size_t bytes_transferred)
+    {
+      boost::ignore_unused(bytes_transferred);
+      if (ec) return on_fail(ec, "read");
+
+      stream_.async_shutdown(beast::bind_front_handler(&HttpsSession::on_shutdown, get_shared()));
+    }
+
+    void on_shutdown(beast::error_code ec)
+    {
+      if (ec == net::error::eof || ec == ssl::error::stream_truncated)
+        ec = {};
+      if (callback_) callback_(ec, std::move(res_));
+    }
+  };
+
+  // ==========================================
+  // HttpClient Implementation
+  // ==========================================
+  HttpClient::HttpClient(net::io_context& ioc)
+    : ioc_(ioc)
+  {
+    // 1. Create internal default SSL context
+    // own_ssl_ctx_ = std::make_shared<ssl::context>(ssl::context::tlsv12_client);
+    own_ssl_ctx_ = std::make_shared<ssl::context>(ssl::context::tls_client);
+
+    // 2. Set default options
+    own_ssl_ctx_->set_default_verify_paths();
+    own_ssl_ctx_->set_verify_mode(ssl::verify_none); // Default to forgiving for ease of use
+
+    // 3. Point the raw pointer to our internal one
+    ssl_ctx_ptr_ = own_ssl_ctx_.get();
+  }
+
+  HttpClient::HttpClient(net::io_context& ioc, ssl::context& ssl_ctx)
+    : ioc_(ioc)
+      , ssl_ctx_ptr_(&ssl_ctx) // Point to user provided context
+  {
+  }
+
+  void HttpClient::set_base_url(const std::string& url)
+  {
+    auto result = boost::urls::parse_uri(url);
+    if (result.has_value())
+    {
+      base_url_ = result.value();
+    }
+    else
+    {
+      // Fallback for missing scheme
+      if (url.find("http") != 0)
+      {
+        auto res2 = boost::urls::parse_uri("http://" + url);
+        if (res2.has_value()) base_url_ = res2.value();
+      }
+    }
+  }
+
+  void HttpClient::set_default_header(const std::string& key, const std::string& value)
+  {
+    default_headers_[key] = value;
+  }
+
+  void HttpClient::set_bearer_token(const std::string& token)
+  {
+    set_default_header("Authorization", "Bearer " + token);
+  }
+
+  void HttpClient::set_timeout(std::chrono::seconds seconds)
+  {
+    timeout_ = seconds;
+  }
+
+  HttpClient::UrlParts HttpClient::parse_target(const std::string& path_in,
+                                                const std::map<std::string, std::string>& query)
+  {
+    boost::urls::url u;
+
+    if (base_url_.has_value())
+    {
+      u = base_url_.value();
+      if (!path_in.empty())
+      {
+        if (path_in.front() != '/') u.set_path(u.path() + "/" + path_in);
+        else u.set_path(path_in);
+      }
+    }
+
+    auto parse_res = boost::urls::parse_uri(path_in);
+    if (parse_res.has_value())
+    {
+      u = parse_res.value();
+    }
+
+    for (const auto& [k, v] : query)
+    {
+      u.params().append({k, v});
+    }
+
+    UrlParts parts;
+    parts.scheme = u.scheme();
+    parts.host = u.host();
+    parts.port = u.port();
+    parts.target = u.encoded_target();
+
+    if (parts.scheme.empty()) parts.scheme = "http";
+    if (parts.target.empty()) parts.target = "/";
+    if (parts.port.empty()) parts.port = (parts.scheme == "https") ? "443" : "80";
+
+    return parts;
+  }
+
+  void HttpClient::request(http::verb method,
+                           std::string path,
+                           const std::map<std::string, std::string>& query_params,
+                           const std::string& body,
+                           const std::map<std::string, std::string>& headers,
+                           ResponseCallback callback)
+  {
+    try
+    {
+      auto parts = parse_target(path, query_params);
+
+      http::request<http::string_body> req{method, parts.target, 11};
+      req.set(http::field::host, parts.host);
+      req.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
+
+      for (const auto& h : default_headers_) req.set(h.first, h.second);
+      for (const auto& h : headers) req.set(h.first, h.second);
+
+      if (!body.empty())
+      {
+        req.body() = body;
+        req.prepare_payload();
+      }
+
+      std::shared_ptr<Session> session;
+      if (parts.scheme == "https")
+      {
+        if (!ssl_ctx_ptr_)
+        {
+          if (callback) callback(beast::error_code(beast::errc::operation_not_supported, beast::system_category()), {});
+          return;
+        }
+        session = std::make_shared<HttpsSession>(ioc_, *ssl_ctx_ptr_, std::move(callback), timeout_);
+      }
+      else
+      {
+        session = std::make_shared<HttpSession>(ioc_, std::move(callback), timeout_);
+      }
+      session->run(parts.host, parts.port, std::move(req));
+    }
+    catch (const std::exception& e)
+    {
+      if (callback) callback(beast::error_code(beast::errc::invalid_argument, beast::system_category()), {});
+    }
   }
 
   http::response<http::string_body> HttpClient::request_sync(
     http::verb method,
-    const std::string& path,
+    std::string path,
     const std::map<std::string, std::string>& query_params,
     const std::string& body,
     const std::map<std::string, std::string>& headers)
   {
-    // Parse URL (Same logic as request)
-    boost::urls::url_view u;
-    boost::urls::url buffer_url;
-    auto url_result = boost::urls::parse_uri(path);
-    if (url_result.has_value())
+    std::promise<std::pair<beast::error_code, http::response<http::string_body>>> p;
+    auto f = p.get_future();
+
+    this->request(method, path, query_params, body, headers,
+                  [&p](beast::error_code ec, http::response<http::string_body> res)
+                  {
+                    p.set_value({ec, std::move(res)});
+                  });
+
+    f.wait();
+    auto result = f.get();
+
+    if (result.first)
     {
-      u = url_result.value();
+      throw boost::system::system_error(result.first);
     }
-    else
-    {
-      // Basic parse fallback
-      auto res = boost::urls::parse_uri_reference(path);
-      if (res.has_value())
-      {
-        u = res.value();
-      }
-      else
-      {
-        throw std::runtime_error("Invalid URL: " + path);
-      }
-    }
-
-    std::string host = u.host();
-    std::string port = u.port();
-    if (port.empty())
-    {
-      port = (u.scheme() == "https") ? "443" : "80";
-    }
-
-    if (!query_params.empty())
-    {
-      buffer_url = u;
-      for (auto& p : query_params)
-      {
-        buffer_url.params().append({p.first, p.second});
-      }
-      u = buffer_url;
-    }
-
-    std::string target = std::string(u.encoded_path());
-    if (target.empty()) target = "/";
-    if (u.has_query())
-    {
-      target += "?" + std::string(u.encoded_query());
-    }
-
-    // Synchronous Request
-    tcp::resolver resolver(ioc_);
-    beast::tcp_stream stream(ioc_);
-
-    auto const results = resolver.resolve(host, port);
-    stream.connect(results);
-
-    http::request<http::string_body> req{method, target, 11};
-    req.set(http::field::host, host);
-    req.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
-    for (const auto& h : headers)
-    {
-      req.set(h.first, h.second);
-    }
-    if (!body.empty())
-    {
-      req.body() = body;
-      req.prepare_payload();
-    }
-
-    http::write(stream, req);
-
-    beast::flat_buffer buffer;
-    http::response<http::string_body> res;
-    http::read(stream, buffer, res);
-
-    beast::error_code ec;
-    stream.socket().shutdown(tcp::socket::shutdown_both, ec);
-
-    return res;
+    return result.second;
   }
 }
