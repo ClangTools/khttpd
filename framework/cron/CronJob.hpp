@@ -6,7 +6,8 @@
 #include <memory>
 #include <iostream>
 #include <ctime>
-#include <atomic> // 引入 atomic
+#include <atomic>
+#include <chrono>
 #include <boost/asio.hpp>
 #include "croncpp.hpp"
 #include "io_context_pool.hpp"
@@ -19,7 +20,7 @@ namespace khttpd::framework
     explicit CronJob(const std::string& expression)
       : timer_(IoContextPool::instance().get_io_context())
         , expression_(expression)
-        , is_running_(false) // 初始化为 false
+        , is_running_(false)
     {
       try
       {
@@ -36,25 +37,44 @@ namespace khttpd::framework
     {
     }
 
-    void start()
+    /**
+     * @brief 启动任务
+     * @param delay_ms 延迟启动时间（毫秒），默认为 0（立即计算下一次执行时间）
+     */
+    void start(std::chrono::milliseconds delay_ms = std::chrono::milliseconds(0))
     {
-      // 防止重复启动
       bool expected = false;
       if (is_running_.compare_exchange_strong(expected, true))
       {
-        schedule_next();
+        if (delay_ms.count() > 0)
+        {
+          // 延迟启动逻辑
+          timer_.expires_after(delay_ms);
+          auto self = shared_from_this();
+          timer_.async_wait([this, self](const boost::system::error_code& ec)
+          {
+            if (!ec && is_running_)
+            {
+              schedule_next(); // 延迟结束后，开始正常的 cron 调度
+            }
+          });
+        }
+        else
+        {
+          // 立即启动
+          schedule_next();
+        }
       }
     }
 
     void stop()
     {
-      // 1. 先修改状态位，这是最重要的！
-      // 即使后面的 cancel 没能阻止当前回调，回调里也会检查这个标志位
       is_running_ = false;
-
-      // 2. 尝试取消当前的等待
       timer_.cancel();
     }
+
+    // 判断当前是否在运行状态
+    bool is_running() const { return is_running_; }
 
   protected:
     virtual void run() = 0;
@@ -62,7 +82,6 @@ namespace khttpd::framework
   private:
     void schedule_next()
     {
-      // 如果已经停止，就不再计算下一次了
       if (!is_running_) return;
 
       auto now_time_t = std::time(nullptr);
@@ -75,11 +94,7 @@ namespace khttpd::framework
 
       timer_.async_wait([this, self](const boost::system::error_code& ec)
       {
-        // 检查 1: 如果被显式 Cancel (operation_aborted)，直接退出
         if (ec == boost::asio::error::operation_aborted) return;
-
-        // 检查 2: 双重保险。
-        // 如果 stop() 在回调入队后被调用，ec 可能是 success，但 is_running_ 已经是 false 了
         if (!is_running_) return;
 
         if (ec)
@@ -97,9 +112,6 @@ namespace khttpd::framework
           std::cerr << "[CronJob] Task exception: " << e.what() << std::endl;
         }
 
-        // 检查 3: 再次确认。
-        // 有可能在 run() 执行期间，外部调用了 stop()。
-        // 如果这里不检查，任务会再次复活。
         if (is_running_)
         {
           schedule_next();
@@ -111,7 +123,7 @@ namespace khttpd::framework
     boost::asio::system_timer timer_;
     std::string expression_;
     cron::cronexpr cron_expr_;
-    std::atomic<bool> is_running_; // 关键修改
+    std::atomic<bool> is_running_;
   };
 }
 
