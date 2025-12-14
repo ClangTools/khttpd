@@ -44,6 +44,15 @@ jobs:
             build --cxxopt='/utf-8'
             build --cxxopt='/wd4514'
             build --cxxopt='/wd4625'
+            build --cxxopt='/wd4582'
+            build --cxxopt='/wd4365'
+            build --cxxopt='/wd5045'
+            build --cxxopt='/wd4820'
+            build --cxxopt='/wd5031'
+            build --cxxopt='/wd4668'
+            build --cxxopt='/wd5027'
+            build --cxxopt='/wd4623'
+            build --cxxopt='/wd4710'
             #build --@boost.mysql//:ssl=boringssl
             build --@boost.asio//:ssl=boringssl
 
