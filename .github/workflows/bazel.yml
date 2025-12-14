@@ -42,6 +42,8 @@ jobs:
           bazelrc: |
             build --cxxopt='/std:c++17'
             build --cxxopt='/utf-8'
+            build --cxxopt='/wd4514'
+            build --cxxopt='/wd4625'
             #build --@boost.mysql//:ssl=boringssl
             build --@boost.asio//:ssl=boringssl
 
