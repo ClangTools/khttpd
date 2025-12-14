@@ -1,6 +1,7 @@
 #include "http_client.hpp"
 #include <boost/asio/connect.hpp>
 #include <iostream>
+#include "io_context_pool.hpp"
 
 namespace khttpd::framework::client
 {
@@ -190,27 +191,38 @@ namespace khttpd::framework::client
     }
   };
 
-  // ==========================================
-  // HttpClient Implementation
-  // ==========================================
-  HttpClient::HttpClient(net::io_context& ioc)
-    : ioc_(ioc)
+  // 1. 傻瓜式：全局 IO + 默认 SSL
+  HttpClient::HttpClient()
+    : ioc_(IoContextPool::instance().get_io_context()) // 从单例获取
   {
-    // 1. Create internal default SSL context
-    // own_ssl_ctx_ = std::make_shared<ssl::context>(ssl::context::tlsv12_client);
+    // 同样的默认 SSL 初始化逻辑
     own_ssl_ctx_ = std::make_shared<ssl::context>(ssl::context::tls_client);
-
-    // 2. Set default options
     own_ssl_ctx_->set_default_verify_paths();
-    own_ssl_ctx_->set_verify_mode(ssl::verify_none); // Default to forgiving for ease of use
-
-    // 3. Point the raw pointer to our internal one
+    own_ssl_ctx_->set_verify_mode(ssl::verify_none);
     ssl_ctx_ptr_ = own_ssl_ctx_.get();
   }
 
+  // 2. 全局 IO + 自定义 SSL
+  HttpClient::HttpClient(ssl::context& ssl_ctx)
+    : ioc_(IoContextPool::instance().get_io_context())
+      , ssl_ctx_ptr_(&ssl_ctx)
+  {
+  }
+
+  // 3. 自定义 IO + 默认 SSL (原逻辑)
+  HttpClient::HttpClient(net::io_context& ioc)
+    : ioc_(ioc)
+  {
+    own_ssl_ctx_ = std::make_shared<ssl::context>(ssl::context::tls_client);
+    own_ssl_ctx_->set_default_verify_paths();
+    own_ssl_ctx_->set_verify_mode(ssl::verify_none);
+    ssl_ctx_ptr_ = own_ssl_ctx_.get();
+  }
+
+  // 4. 全自定义
   HttpClient::HttpClient(net::io_context& ioc, ssl::context& ssl_ctx)
     : ioc_(ioc)
-      , ssl_ctx_ptr_(&ssl_ctx) // Point to user provided context
+      , ssl_ctx_ptr_(&ssl_ctx)
   {
   }
 

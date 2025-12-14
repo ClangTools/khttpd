@@ -2,6 +2,8 @@
 #include <iostream>
 #include <boost/url.hpp>
 
+#include "io_context_pool.hpp"
+
 namespace khttpd::framework::client
 {
   // ==========================================
@@ -336,6 +338,15 @@ namespace khttpd::framework::client
   // ==========================================
   // WebsocketClient Implementation
   // ==========================================
+
+  WebsocketClient::WebsocketClient()
+      : ioc_(IoContextPool::instance().get_io_context())
+  {
+    own_ssl_ctx_ = std::make_shared<ssl::context>(ssl::context::tls_client);
+    own_ssl_ctx_->set_default_verify_paths();
+    own_ssl_ctx_->set_verify_mode(ssl::verify_none);
+    ssl_ctx_ptr_ = own_ssl_ctx_.get();
+  }
 
   WebsocketClient::WebsocketClient(net::io_context& ioc) : ioc_(ioc)
   {

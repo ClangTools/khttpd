@@ -71,10 +71,14 @@ namespace khttpd::framework::client
   public:
     using ResponseCallback = std::function<void(beast::error_code, http::response<http::string_body>)>;
 
-    // 构造函数 1: 仅传 IO context，内部创建默认 SSL context
-    explicit HttpClient(net::io_context& ioc);
+    // 1. 【新增】傻瓜式构造函数：使用全局 IO 池，内部默认 SSL
+    HttpClient();
 
-    // 构造函数 2: 传入 IO context 和 自定义 SSL context
+    // 2. 【新增】使用全局 IO 池，但指定自定义 SSL
+    explicit HttpClient(ssl::context& ssl_ctx);
+
+    // 3. 【保留】专家模式：指定外部 IO Context
+    explicit HttpClient(net::io_context& ioc);
     HttpClient(net::io_context& ioc, ssl::context& ssl_ctx);
 
     virtual ~HttpClient() = default;

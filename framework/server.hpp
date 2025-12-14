@@ -38,8 +38,8 @@ namespace khttpd::framework
     void stop();
 
   private:
-    std::optional<net::io_context> ioc_;
-    int num_threads_;
+    // std::optional<net::io_context> ioc_;
+    // int num_threads_;
     std::vector<std::thread> threads_;
     net::signal_set signals_;
     const std::string web_root_;

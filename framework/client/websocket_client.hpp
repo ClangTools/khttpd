@@ -34,6 +34,7 @@ namespace khttpd::framework::client
     using ErrorHandler = std::function<void(beast::error_code)>;
     using CloseHandler = std::function<void()>;
 
+    WebsocketClient();
     // 构造函数：支持默认 SSL 或 外部 SSL Context
     explicit WebsocketClient(net::io_context& ioc);
     WebsocketClient(net::io_context& ioc, ssl::context& ssl_ctx);

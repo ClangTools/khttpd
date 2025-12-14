@@ -5,14 +5,14 @@
 #include <boost/filesystem.hpp>
 #include <utility>
 
+#include "io_context_pool.hpp"
+
 namespace khttpd::framework
 {
   Server::Server(const tcp::endpoint& endpoint, std::string web_root, int num_threads)
-    : ioc_(std::in_place, num_threads),
-      num_threads_(num_threads),
-      signals_(*ioc_, SIGINT, SIGTERM),
+    : signals_(IoContextPool::instance(num_threads).get_io_context(), SIGINT, SIGTERM),
       web_root_(std::move(web_root)),
-      acceptor_(net::make_strand(*ioc_))
+      acceptor_(net::make_strand(IoContextPool::instance().get_io_context()))
   {
     boost::beast::error_code ec;
 
@@ -91,21 +91,8 @@ namespace khttpd::framework
 
     do_accept();
 
-    threads_.reserve(num_threads_ - 1);
-    for (int i = 0; i < num_threads_ - 1; ++i)
-    {
-      threads_.emplace_back([&ioc = *ioc_]
-      {
-        ioc.run();
-      });
-    }
+    IoContextPool::instance().get_io_context().run();
 
-    (*ioc_).run();
-
-    for (auto& t : threads_)
-    {
-      t.join();
-    }
     fmt::print("Server workers stopped.\n");
   }
 
@@ -118,17 +105,14 @@ namespace khttpd::framework
       fmt::print(stderr, "Server acceptor close error: {}\n", ec.message());
     }
 
-    if (ioc_.has_value())
-    {
-      (*ioc_).stop();
-    }
+    IoContextPool::instance().stop();
     fmt::print("Server stopped.\n");
   }
 
   void Server::do_accept()
   {
     acceptor_.async_accept(
-      net::make_strand(*ioc_),
+      net::make_strand(IoContextPool::instance().get_io_context()),
       beast::bind_front_handler(&Server::on_accept, shared_from_this()));
   }
 
