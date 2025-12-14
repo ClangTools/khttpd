@@ -3,6 +3,7 @@
 
 #include <string>
 #include <tuple>
+#include <map> // 确保包含 map
 #include <boost/beast/http/verb.hpp>
 
 // =========================================================================
@@ -19,10 +20,9 @@
 #endif
 
 // =========================================================================
-// MSVC Compatibility Helper (关键修复)
+// MSVC Compatibility Helper (关键修复 1)
 // =========================================================================
-// MSVC 默认预处理器会将 __VA_ARGS__ 视为单个标记。
-// 使用 EXPAND 宏可以强制其展开为多个参数。
+// 用于强制 MSVC 展开 __VA_ARGS__
 #define EXPAND(x) x
 
 // =========================================================================
@@ -34,24 +34,18 @@
 #define HEADER(Type, Name, Key) (HEADER_TAG, Type, Name, Key)
 
 // =========================================================================
-// Tuple Unpacking & Dispatching
+// Dispatching Logic (关键修复 2：简化解包逻辑)
 // =========================================================================
-#define GET_TAG(Tuple) GET_TAG_I Tuple
-#define GET_TAG_I(Tag, ...) Tag
 
-#define POP_TAG(Tuple) POP_TAG_I Tuple
-#define POP_TAG_I(Tag, ...) __VA_ARGS__
+// 之前的 POP_TAG 方式在 MSVC 上容易出错。
+// 我们改为直接展开 Tuple：
+// SIG_DISPATCH((TAG, Type, Name)) -> SIG_DISPATCH_I(TAG, Type, Name) -> SIG_TAG(Type, Name)
 
-// 修复: 在 INVOKE 中使用 EXPAND，确保 POP_TAG 返回的参数在传递给具体宏之前被正确拆分
-#define INVOKE(MACRO, ...) EXPAND(MACRO(__VA_ARGS__))
+#define SIG_DISPATCH(Tuple) EXPAND(SIG_DISPATCH_I Tuple)
+#define SIG_DISPATCH_I(Tag, ...) EXPAND(SIG_##Tag(__VA_ARGS__))
 
-#define SIG_DISPATCH(Tuple) SIG_DISPATCH_I(GET_TAG(Tuple), Tuple)
-#define SIG_DISPATCH_I(Tag, Tuple) SIG_DISPATCH_II(Tag, Tuple)
-#define SIG_DISPATCH_II(Tag, Tuple) INVOKE(SIG_##Tag, POP_TAG(Tuple))
-
-#define PROC_DISPATCH(Tuple) PROC_DISPATCH_I(GET_TAG(Tuple), Tuple)
-#define PROC_DISPATCH_I(Tag, Tuple) PROC_DISPATCH_II(Tag, Tuple)
-#define PROC_DISPATCH_II(Tag, Tuple) INVOKE(PROC_##Tag, POP_TAG(Tuple))
+#define PROC_DISPATCH(Tuple) EXPAND(PROC_DISPATCH_I Tuple)
+#define PROC_DISPATCH_I(Tag, ...) EXPAND(PROC_##Tag(__VA_ARGS__))
 
 // =========================================================================
 // Implementation Logic
@@ -133,14 +127,13 @@
     }
 
 // =========================================================================
-// Dispatcher Logic
+// Dispatcher Logic (关键修复 3：修正宏选择计数)
 // =========================================================================
 
 #define GET_MACRO(_1, _2, _3, _4, _5, _6, _7, NAME, ...) NAME
 
-// 修复: 在最外层使用 EXPAND 包裹 GET_MACRO 调用
-// 这样 MSVC 在传递参数给 GET_MACRO 之前，会先展开 __VA_ARGS__，
-// 从而确保参数计数（_1 到 _7）正确，选中正确的 API_CALL_x 宏。
+// 在这里使用 EXPAND 包裹整个 GET_MACRO 调用。
+// 这解决了 "not enough arguments" 警告，并确保正确选择 API_CALL_x 宏。
 #define API_CALL(...) EXPAND(GET_MACRO(__VA_ARGS__, API_CALL_4, API_CALL_3, API_CALL_2, API_CALL_1, API_CALL_0, DUMMY)(__VA_ARGS__))
 
 #if defined(__clang__)
