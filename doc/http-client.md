@@ -171,6 +171,30 @@ KHTTPD_API_CLIENT_END()
 
 ---
 
+## 流式 HTTP 客户端
+
+`HttpClient` 返回 `response<string_body>`，适合普通 API。大请求或响应应使用 `HttpClientStream`，由调用方提供固定大小缓冲区：
+
+```cpp
+#include "framework/client/http_client_stream.hpp"
+
+auto stream = std::make_shared<HttpClientStream>(ioc);
+HttpClientStream::RequestHead head{http::verb::post, "/upload", 11};
+head.chunked(true);
+
+stream->async_start("http://storage.internal/upload", std::move(head),
+  [stream](beast::error_code ec) {
+    // async_write_some(...) -> async_finish_request(...)
+    // -> async_read_response_head(...) -> async_read_some(...)
+  });
+```
+
+同一方向必须串行调用：等待当前 read/write 回调后再提交下一块。这既限制 in-flight 数据，也让 TCP 自然提供背压。调用 `cancel()` 会取消解析、连接和未完成 I/O。
+
+当前流式客户端只支持 `http://`。`https://` 返回 `operation_not_supported`，且不会回退到全量缓存；普通 `HttpClient` 的 HTTPS 能力不受影响。
+
+---
+
 ## WebSocket 客户端
 
 ### 基本使用
@@ -185,6 +209,13 @@ auto ws = std::make_shared<khttpd::framework::client::WebsocketClient>();
 // 设置回调
 ws->set_on_message([](const std::string& msg) {
     fmt::print("Received: {}\n", msg);
+});
+
+// 需要保留 text/binary/control 类型时使用帧回调。
+ws->set_on_frame([](const WebsocketFrame& frame) {
+    if (frame.type == WebsocketFrameType::binary) {
+        fmt::print("binary bytes: {}\n", frame.payload.size());
+    }
 });
 
 ws->set_on_error([](beast::error_code ec) {
@@ -215,6 +246,9 @@ ws->send("Hello, server!");
 ws->send("Message 1");
 ws->send("Message 2");
 ws->send("Message 3");
+
+// 发送二进制帧，payload 可以包含 NUL 字节。
+ws->send({WebsocketFrameType::binary, std::string("\x00\x01", 2)});
 ```
 
 ### 完整示例：Echo 客户端

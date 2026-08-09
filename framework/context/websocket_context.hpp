@@ -13,6 +13,16 @@ namespace khttpd::framework
 {
   class WebsocketSession;
 
+  enum class WebsocketFrameType { text, binary, ping, pong, close };
+
+  struct WebsocketFrame
+  {
+    WebsocketFrameType type = WebsocketFrameType::text;
+    std::string payload;
+    uint16_t close_code = 1000;
+    std::string close_reason;
+  };
+
   // HeaderList deliberately keeps duplicate fields (notably Cookie and
   // Sec-WebSocket-Extensions) in their original handshake order.
   using WebsocketHeaderList = std::vector<std::pair<std::string, std::string>>;
@@ -35,6 +45,7 @@ namespace khttpd::framework
     bool is_text;
     boost::beast::error_code error_code;
     std::string path;
+    WebsocketFrame frame;
 
     std::map<std::string, std::any> extended_data;
 
@@ -44,6 +55,7 @@ namespace khttpd::framework
                      boost::beast::error_code ec = {});
 
     void send(const std::string& msg, bool is_text = true);
+    void send(WebsocketFrame frame);
 
     const WebsocketHandshakeRequest& handshake() const;
     std::optional<std::string> get_header(const std::string& name) const;

@@ -88,6 +88,9 @@ int main()
     auto server = std::make_shared<khttpd::framework::Server>(
         tcp::endpoint{address, port}, "web_root", threads);
 
+    // 普通 JSON/form 路由的 body 默认最多 16 MiB，可按服务需要调整。
+    server->set_max_buffered_request_body_size(32ULL * 1024 * 1024);
+
     auto& router = server->get_http_router();
 
     // 简单路由
@@ -140,6 +143,12 @@ curl http://localhost:8080/hello/World
 curl -X POST -H "Content-Type: application/json" \
      -d '{"msg":"hi"}' http://localhost:8080/api/echo
 # {"msg":"hi"}
+```
+
+框架开发与回归测试：
+
+```bash
+bazel test //framework/... --test_output=errors
 ```
 
 ## 下一步

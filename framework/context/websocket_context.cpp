@@ -17,6 +17,8 @@ namespace khttpd::framework
     {
       id = session_shared_ptr->id;
     }
+    frame.type = text ? WebsocketFrameType::text : WebsocketFrameType::binary;
+    frame.payload = message;
   }
 
   WebsocketContext::WebsocketContext(std::weak_ptr<WebsocketSession> session, std::string path_str,
@@ -40,6 +42,12 @@ namespace khttpd::framework
     {
       spdlog::error("Attempted to send WS message to expired session (path: {}).", path);
     }
+  }
+
+  void WebsocketContext::send(WebsocketFrame outbound_frame)
+  {
+    if (auto session = session_weak_ptr.lock()) session->send_frame(std::move(outbound_frame));
+    else spdlog::error("Attempted to send WS frame to expired session (path: {}).", path);
   }
 
   const WebsocketHandshakeRequest& WebsocketContext::handshake() const

@@ -28,6 +28,7 @@ namespace khttpd::framework
     void run_handshake(http::request<Body, http::basic_fields<Allocator>> req);
 
     virtual void send_message(const std::string& msg, bool is_text);
+    virtual void send_frame(WebsocketFrame frame);
 
     const WebsocketHandshakeRequest& handshake() const { return handshake_; }
 
@@ -55,7 +56,7 @@ namespace khttpd::framework
     static constexpr size_t const auto_fragment_threshold_ = fragment_size_ * 2;
 
     // Write queue to serialize concurrent async_write calls
-    std::queue<std::pair<std::shared_ptr<const std::string>, bool>> write_queue_;
+    std::queue<WebsocketFrame> write_queue_;
     bool writing_ = false;
     bool closed_ = false;
     bool close_pending_ = false;

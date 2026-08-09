@@ -9,7 +9,7 @@ and [Boost.Asio](https://www.boost.org/doc/libs/release/libs/asio/), managed wit
 ## Features
 
 - **HTTP Server** — Multi-threaded, async I/O server powered by Boost.Asio strand-based concurrency
-- **WebSocket Support** — Full WebSocket lifecycle management (onopen / onmessage / onclose / onerror)
+- **WebSocket Support** — Dynamic routes, handshake metadata, typed text/binary/control frames, and full lifecycle management
 - **Routing** — Express-style route registration with path parameters (`/users/:id`), query params, and method
   specificity sorting
 - **Controller Pattern** — CRTP-based `BaseController` with `KHTTPD_ROUTE` / `KHTTPD_WSROUTE` macros for clean route
@@ -20,6 +20,7 @@ and [Boost.Asio](https://www.boost.org/doc/libs/release/libs/asio/), managed wit
 - **Interceptors** — Pre-request / post-response middleware pipeline
 - **Exception Handling** — Type-safe exception dispatcher with per-type handlers
 - **Chunked Streaming** — Server-sent chunked transfer encoding via `HttpContext::chunked()`
+- **Bidirectional HTTP Streaming** — Header-first request routing, fixed-buffer upload/download, proxy backpressure, and Range forwarding
 - **Cookie Support** — Read / write cookies with configurable `CookieOptions` (path, domain, SameSite, etc.)
 - **Form & Multipart** — `application/x-www-form-urlencoded` and `multipart/form-data` parsing (file uploads)
 - **JSON** — Native `boost::json` integration with `get_json()`, `set_body_json()`, `set_body_from()`
@@ -87,6 +88,9 @@ int main() {
 
     auto& router = server->get_http_router();
 
+    // Buffered JSON/form routes default to 16 MiB. Configure the limit in bytes.
+    server->set_max_buffered_request_body_size(32ULL * 1024 * 1024);
+
     // Simple route
     router.get("/hello", [](khttpd::framework::HttpContext& ctx) {
         std::string name = ctx.get_query_param("name").value_or("World");
@@ -128,6 +132,8 @@ framework/
 ├── io_context_pool.hpp         # Asio io_context thread pool
 ├── context/
 │   ├── http_context.hpp/cpp    # Request/response abstraction (params, body, cookies, streaming)
+│   ├── http_request_stream.hpp # Fixed-buffer inbound request body
+│   ├── http_response_stream.hpp # Fixed-buffer outbound response body
 │   └── websocket_context.hpp/cpp # WebSocket session context (send, attributes)
 ├── router/
 │   ├── http_router.hpp/cpp     # Route matching, interceptors, exception dispatch
@@ -136,6 +142,8 @@ framework/
 │   └── http_controller.hpp     # CRTP BaseController + KHTTPD_ROUTE / KHTTPD_WSROUTE macros
 ├── client/
 │   ├── http_client.hpp/cpp     # Sync/async HTTP client with SSL
+│   ├── http_client_stream.hpp/cpp # Fixed-buffer HTTP streaming client
+│   ├── http_proxy_session.hpp/cpp # Bidirectional streaming proxy pump
 │   └── websocket_client.hpp/cpp # WebSocket client
 ├── interceptor/
 │   └── interceptor.hpp         # Pre/Post middleware interface
@@ -184,9 +192,17 @@ framework/
 
 ```cpp
 auto& ws = server->get_websocket_router();
-ws.add_handler("/ws",
-    [](WebsocketContext& ctx) { /* onopen  */ ctx.send("Welcome!"); },
-    [](WebsocketContext& ctx) { /* onmessage */ ctx.send("Echo: " + ctx.message, ctx.is_text); },
+ws.add_handler("/gateway/:target",
+    [](WebsocketContext& ctx) {
+        auto target = ctx.get_path_param("target"); // may contain multiple path segments
+        auto token = ctx.get_header("Authorization");
+        auto trace = ctx.get_query_param("trace");
+        ctx.send("Welcome!");
+    },
+    [](WebsocketContext& ctx) {
+        // frame.type preserves text/binary; payload may contain arbitrary bytes.
+        ctx.send(ctx.frame);
+    },
     [](WebsocketContext& ctx) { /* onclose  */ },
     [](WebsocketContext& ctx) { /* onerror  */ }
 );
@@ -210,6 +226,48 @@ class MyController : public khttpd::framework::BaseController<MyController> {
 
 // Register
 MyController::create()->register_routes(server->get_http_router());
+```
+
+### Streaming HTTP routes and proxying
+
+Large request and response bodies can bypass `string_body` buffering by using a
+stream route. Reads and writes are serialized through fixed-size buffers, so
+backpressure is propagated between the downstream and upstream connections.
+
+```cpp
+router.stream("/gateway/upload", boost::beast::http::verb::post,
+  [](HttpContext& ctx,
+     std::shared_ptr<HttpRequestStream> request,
+     std::shared_ptr<HttpResponseStream> response,
+     HttpStreamComplete complete)
+  {
+    client::HttpClientStream::RequestHead head{
+      ctx.method(), "/upload", ctx.get_request().version()};
+    for (const auto& field : ctx.get_request())
+      head.insert(field.name_string(), field.value());
+
+    auto proxy = std::make_shared<client::HttpProxySession>(request, response);
+    proxy->start("http://upstream.internal/upload", std::move(head));
+  });
+```
+
+Normal routes remain buffered for JSON/form compatibility and reject request
+bodies above the configurable limit (16 MiB by default; use
+`Server::set_max_buffered_request_body_size(bytes)`). Stream routes are not
+subject to this buffered-body limit and have no size-dependent allocation;
+the proxy buffer defaults to 64 KiB and can be configured in its constructor.
+
+`HttpClientStream` currently accepts `http://` upstream URLs only. It returns
+`operation_not_supported` for `https://` and never silently falls back to a
+fully buffered request. The regular `HttpClient` continues to support HTTPS.
+
+### Tests
+
+Run the complete framework suite, including buffered-body boundaries, streaming
+edge cases, proxy cancellation, WebSocket dynamic routing, and frame fidelity:
+
+```bash
+bazel test //framework/... --test_output=errors
 ```
 
 ### Interceptors

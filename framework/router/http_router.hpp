@@ -3,6 +3,8 @@
 #define KHTTPD_FRAMEWORK_ROUTER_HTTP_ROUT
 
 #include "context/http_context.hpp"
+#include "context/http_request_stream.hpp"
+#include "context/http_response_stream.hpp"
 #include "interceptor/interceptor.hpp"
 #include "exception/exception_handler.hpp"
 #include <functional>
@@ -15,6 +17,9 @@
 namespace khttpd::framework
 {
   using HttpHandler = std::function<void(HttpContext&)>;
+  using HttpStreamComplete = std::function<void()>;
+  using HttpStreamHandler = std::function<void(HttpContext&, std::shared_ptr<HttpRequestStream>,
+                                               std::shared_ptr<HttpResponseStream>, HttpStreamComplete)>;
   using UnknownExceptionHandler = std::function<void(HttpContext&)>;
 
   // 路由条目结构
@@ -24,6 +29,7 @@ namespace khttpd::framework
     std::regex path_regex;
     std::vector<std::string> param_names;
     std::map<boost::beast::http::verb, HttpHandler> handlers;
+    std::map<boost::beast::http::verb, HttpStreamHandler> stream_handlers;
     int literal_segments_count = 0;
     int dynamic_segments_count = 0;
 
@@ -51,6 +57,13 @@ namespace khttpd::framework
     void put(const std::string& path, HttpHandler handler);
     void del(const std::string& path, HttpHandler handler);
     void options(const std::string& path, HttpHandler handler);
+    void stream(const std::string& path, boost::beast::http::verb method, HttpStreamHandler handler);
+
+    // Used by HttpSession after it has parsed only the request header.
+    bool is_stream_route(const std::string& path, boost::beast::http::verb method) const;
+    bool dispatch_stream(HttpContext& ctx, std::shared_ptr<HttpRequestStream> stream,
+                         std::shared_ptr<HttpResponseStream> response_stream,
+                         HttpStreamComplete complete) const;
 
     void add_interceptor(std::shared_ptr<Interceptor> interceptor);
     InterceptorResult run_pre_interceptors(HttpContext& ctx) const;

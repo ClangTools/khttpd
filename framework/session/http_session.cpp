@@ -6,6 +6,7 @@
 #include <sstream>
 #include <thread>
 #include <utility>
+#include <limits>
 
 
 using namespace khttpd::framework;
@@ -26,14 +27,46 @@ struct HttpSession::ChunkWriteState
   }
 };
 
+class HttpSession::RequestStreamImpl final : public HttpRequestStream
+{
+  std::shared_ptr<HttpSession> session_;
+public:
+  explicit RequestStreamImpl(const std::shared_ptr<HttpSession>& session) : session_(session) {}
+  void async_read_some(net::mutable_buffer target, ReadCallback callback) override
+  {
+    if (session_) session_->async_read_stream_body(target, std::move(callback));
+    else callback(net::error::operation_aborted, 0, true);
+  }
+  void cancel() override
+  {
+    if (session_) session_->cancel_stream_body();
+  }
+};
+
+class HttpSession::ResponseStreamImpl final : public HttpResponseStream
+{
+  std::shared_ptr<HttpSession> session_;
+public:
+  explicit ResponseStreamImpl(const std::shared_ptr<HttpSession>& session) : session_(session) {}
+  void async_start(ResponseHead head, Callback cb) override
+  { if (session_) session_->start_stream_response(std::move(head), std::move(cb)); else cb(net::error::operation_aborted); }
+  void async_write_some(net::const_buffer b, Callback cb) override
+  { if (session_) session_->write_stream_response(b, std::move(cb)); else cb(net::error::operation_aborted); }
+  void async_finish(Callback cb) override
+  { if (session_) session_->finish_stream_response(std::move(cb)); else cb(net::error::operation_aborted); }
+  void cancel() override { if (session_) session_->cancel_stream_body(); }
+};
+
 HttpSession::HttpSession(tcp::socket&& socket, HttpRouter& router, WebsocketRouter& ws_router,
                          const std::string& web_root,
-                         const boost::filesystem::path& canonical_web_root)
+                         const boost::filesystem::path& canonical_web_root,
+                         std::uint64_t max_buffered_request_body_size)
   : stream_(std::move(socket)),
     router_(router),
     websocket_router_(ws_router),
     web_root_path_(web_root),
-    canonical_web_root_path_(canonical_web_root)
+    canonical_web_root_path_(canonical_web_root),
+    max_buffered_request_body_size_(max_buffered_request_body_size)
 {
   if (canonical_web_root_path_.empty())
   {
@@ -50,8 +83,209 @@ void HttpSession::run()
 void HttpSession::do_read()
 {
   req_ = {};
-  http::async_read(stream_, buffer_, req_,
-                   beast::bind_front_handler(&HttpSession::on_read, shared_from_this()));
+  res_ = {};
+  ctx.reset();
+  buffered_body_.clear();
+  stream_completed_ = false;
+  request_parser_.emplace();
+  request_parser_->header_limit(64 * 1024);
+  request_parser_->body_limit((std::numeric_limits<std::uint64_t>::max)());
+  http::async_read_header(stream_, buffer_, *request_parser_,
+                          beast::bind_front_handler(&HttpSession::on_read_header, shared_from_this()));
+}
+
+void HttpSession::copy_request_head()
+{
+  const auto& source = request_parser_->get();
+  req_.method(source.method());
+  req_.target(source.target());
+  req_.version(source.version());
+  req_.keep_alive(source.keep_alive());
+  for (const auto& field : source) req_.insert(field.name_string(), field.value());
+}
+
+void HttpSession::on_read_header(const beast::error_code& ec, std::size_t bytes_transferred)
+{
+  boost::ignore_unused(bytes_transferred);
+  if (ec == http::error::end_of_stream) return do_close();
+  if (ec) { spdlog::error("HttpSession header read error: {}", ec.message()); return do_close(); }
+  copy_request_head();
+  if (beast::websocket::is_upgrade(req_)) return handle_websocket_upgrade();
+
+  std::string path(req_.target());
+  if (const auto query = path.find('?'); query != std::string::npos) path.resize(query);
+  const bool stream_route = router_.is_stream_route(path, req_.method());
+  if (!stream_route)
+  {
+    const auto content_length = request_parser_->content_length();
+    if (content_length && *content_length > max_buffered_request_body_size_)
+      return send_payload_too_large();
+  }
+  const auto expect = req_[http::field::expect];
+  if (boost::beast::iequals(expect, "100-continue"))
+  {
+    auto response = std::make_shared<http::response<http::empty_body>>(http::status::continue_, req_.version());
+    http::async_write(stream_, *response, [self = shared_from_this(), response, stream_route]
+      (beast::error_code write_ec, std::size_t)
+    {
+      if (write_ec) return self->do_close();
+      if (stream_route) self->handle_stream_request(); else self->read_buffered_body();
+    });
+    return;
+  }
+  if (stream_route) return handle_stream_request();
+  read_buffered_body();
+}
+
+void HttpSession::read_buffered_body()
+{
+  if (request_parser_->is_done())
+  {
+    req_.body() = std::move(buffered_body_);
+    return handle_request();
+  }
+  auto& body = request_parser_->get().body();
+  body.data = buffered_body_chunk_.data();
+  body.size = buffered_body_chunk_.size();
+  http::async_read_some(stream_, buffer_, *request_parser_,
+                        beast::bind_front_handler(&HttpSession::on_read_buffered_body, shared_from_this()));
+}
+
+void HttpSession::on_read_buffered_body(beast::error_code ec, std::size_t bytes_transferred)
+{
+  boost::ignore_unused(bytes_transferred);
+  if (ec == http::error::need_buffer) ec = {};
+  if (ec) { spdlog::error("HttpSession body read error: {}", ec.message()); return do_close(); }
+  const auto produced = buffered_body_chunk_.size() - request_parser_->get().body().size;
+  if (buffered_body_.size() > max_buffered_request_body_size_ ||
+      produced > max_buffered_request_body_size_ - buffered_body_.size())
+    return send_payload_too_large();
+  buffered_body_.append(buffered_body_chunk_.data(), produced);
+  read_buffered_body();
+}
+
+void HttpSession::send_payload_too_large()
+{
+  http::response<http::string_body> response{http::status::payload_too_large, req_.version()};
+  response.keep_alive(false);
+  response.body() = "request body exceeds buffered route limit";
+  response.prepare_payload();
+  send_response(std::move(response));
+}
+
+void HttpSession::handle_stream_request()
+{
+  ctx = std::make_shared<HttpContext>(req_, res_);
+  auto stream = std::make_shared<RequestStreamImpl>(shared_from_this());
+  auto response_stream = std::make_shared<ResponseStreamImpl>(shared_from_this());
+  std::weak_ptr<HttpSession> weak = shared_from_this();
+  const auto complete = [weak]
+  {
+    if (auto self = weak.lock()) net::post(self->stream_.get_executor(), [self]
+    {
+      if (self->stream_completed_) return;
+      self->stream_completed_ = true;
+      self->router_.run_post_interceptors(*self->ctx);
+      if (self->res_.chunked()) self->send_chunked_response();
+      else self->send_response(std::move(self->res_));
+    });
+  };
+  try
+  {
+    if (router_.run_pre_interceptors(*ctx) == InterceptorResult::Stop) return complete();
+    if (!router_.dispatch_stream(*ctx, std::move(stream), std::move(response_stream), complete))
+    {
+      ctx->set_status(http::status::not_found);
+      ctx->set_body("stream route not found");
+      complete();
+    }
+  }
+  catch (...) { router_.handle_exception(std::current_exception(), *ctx); complete(); }
+}
+
+void HttpSession::async_read_stream_body(net::mutable_buffer target, HttpRequestStream::ReadCallback callback)
+{
+  auto self = shared_from_this();
+  net::post(stream_.get_executor(), [self, target, callback = std::move(callback)]() mutable
+  {
+    if (!self->request_parser_ || self->request_parser_->is_done()) return callback({}, 0, true);
+    auto& body = self->request_parser_->get().body();
+    body.data = target.data();
+    body.size = target.size();
+    http::async_read_some(self->stream_, self->buffer_, *self->request_parser_,
+      [self, capacity = target.size(), callback = std::move(callback)](beast::error_code ec, std::size_t) mutable
+      {
+        if (ec == http::error::need_buffer) ec = {};
+        const auto produced = capacity - self->request_parser_->get().body().size;
+        callback(ec, produced, self->request_parser_->is_done());
+      });
+  });
+}
+
+void HttpSession::cancel_stream_body()
+{
+  beast::error_code ignored;
+  stream_.cancel();
+  stream_.socket().shutdown(tcp::socket::shutdown_both, ignored);
+}
+
+void HttpSession::start_stream_response(HttpResponseStream::ResponseHead head, HttpResponseStream::Callback callback)
+{
+  auto self = shared_from_this();
+  net::post(stream_.get_executor(), [self, head = std::move(head), callback = std::move(callback)]() mutable
+  {
+    self->streaming_response_ = {};
+    self->streaming_response_.result(head.result()); self->streaming_response_.version(head.version());
+    self->streaming_response_.keep_alive(head.keep_alive());
+    for (const auto& field : head) self->streaming_response_.insert(field.name_string(), field.value());
+    if (!self->streaming_response_.has_content_length() && !self->streaming_response_.chunked())
+      self->streaming_response_.chunked(true);
+    self->streaming_response_.body().more = true;
+    self->streaming_response_serializer_.emplace(self->streaming_response_);
+    http::async_write_header(self->stream_, *self->streaming_response_serializer_,
+      [callback = std::move(callback)](beast::error_code ec, std::size_t) mutable
+      { callback(ec); });
+  });
+}
+
+void HttpSession::write_stream_response(net::const_buffer source, HttpResponseStream::Callback callback)
+{
+  auto self = shared_from_this();
+  net::post(stream_.get_executor(), [self, source, callback = std::move(callback)]() mutable
+  {
+    if (!self->streaming_response_serializer_) return callback(net::error::operation_aborted);
+    auto& body = self->streaming_response_.body();
+    body.data = const_cast<void*>(source.data()); body.size = source.size(); body.more = true;
+    http::async_write(self->stream_, *self->streaming_response_serializer_,
+      [callback = std::move(callback)](beast::error_code ec, std::size_t) mutable
+      { if (ec == http::error::need_buffer) ec = {}; callback(ec); });
+  });
+}
+
+void HttpSession::finish_stream_response(HttpResponseStream::Callback callback)
+{
+  auto self = shared_from_this();
+  net::post(stream_.get_executor(), [self, callback = std::move(callback)]() mutable
+  {
+    if (!self->streaming_response_serializer_) return callback(net::error::operation_aborted);
+    if (self->streaming_response_serializer_->is_done())
+    {
+      callback({});
+      const bool keep_alive = self->streaming_response_.keep_alive();
+      self->streaming_response_serializer_.reset();
+      if (keep_alive) self->do_read(); else self->do_close();
+      return;
+    }
+    auto& body = self->streaming_response_.body(); body.data = nullptr; body.size = 0; body.more = false;
+    http::async_write(self->stream_, *self->streaming_response_serializer_,
+      [self, callback = std::move(callback)](beast::error_code ec, std::size_t) mutable
+      {
+        callback(ec);
+        const bool keep_alive = self->streaming_response_.keep_alive();
+        self->streaming_response_serializer_.reset();
+        if (!ec && keep_alive) self->do_read(); else self->do_close();
+      });
+  });
 }
 
 void HttpSession::on_read(const beast::error_code& ec, std::size_t bytes_transferred)
@@ -452,6 +686,7 @@ void HttpSession::on_write(bool keep_alive, beast::error_code ec, std::size_t by
 
 void HttpSession::do_close()
 {
+  spdlog::debug("HttpSession closing connection");
   beast::error_code ec;
   stream_.socket().shutdown(tcp::socket::shutdown_send, ec);
   if (ec)

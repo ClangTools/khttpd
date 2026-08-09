@@ -151,6 +151,59 @@ namespace khttpd::framework
     add_route(path, boost::beast::http::verb::options, std::move(handler));
   }
 
+  void HttpRouter::stream(const std::string& path_pattern, const boost::beast::http::verb method,
+                          HttpStreamHandler handler)
+  {
+    for (auto& entry : routes_)
+    {
+      if (entry.original_path == path_pattern)
+      {
+        entry.stream_handlers[method] = std::move(handler);
+        return;
+      }
+    }
+    RouteEntry entry;
+    entry.original_path = path_pattern;
+    auto [regex, params, literal_count, dynamic_count] = parse_path_pattern(path_pattern);
+    entry.path_regex = std::move(regex);
+    entry.param_names = std::move(params);
+    entry.literal_segments_count = literal_count;
+    entry.dynamic_segments_count = dynamic_count;
+    entry.stream_handlers[method] = std::move(handler);
+    routes_.push_back(std::move(entry));
+    std::sort(routes_.begin(), routes_.end(), RouteEntry::compare_specificity);
+  }
+
+  bool HttpRouter::is_stream_route(const std::string& path, const boost::beast::http::verb method) const
+  {
+    for (const auto& entry : routes_)
+    {
+      if (!std::regex_match(path, entry.path_regex)) continue;
+      return entry.stream_handlers.find(method) != entry.stream_handlers.end();
+    }
+    return false;
+  }
+
+  bool HttpRouter::dispatch_stream(HttpContext& ctx, std::shared_ptr<HttpRequestStream> stream,
+                                   std::shared_ptr<HttpResponseStream> response_stream,
+                                   HttpStreamComplete complete) const
+  {
+    for (const auto& entry : routes_)
+    {
+      std::smatch matches;
+      if (!std::regex_match(ctx.path(), matches, entry.path_regex)) continue;
+      const auto handler = entry.stream_handlers.find(ctx.method());
+      if (handler == entry.stream_handlers.end()) return false;
+      std::map<std::string, std::string> params;
+      for (size_t i = 0; i < entry.param_names.size() && i + 1 < matches.size(); ++i)
+        params[entry.param_names[i]] = matches[i + 1].str();
+      ctx.set_path_params(std::move(params));
+      handler->second(ctx, std::move(stream), std::move(response_stream), std::move(complete));
+      return true;
+    }
+    return false;
+  }
+
   void HttpRouter::add_interceptor(std::shared_ptr<Interceptor> interceptor)
   {
     interceptors_.push_back(std::move(interceptor));

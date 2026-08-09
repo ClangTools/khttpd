@@ -122,9 +122,10 @@ router.set_unknown_exception_handler([](HttpContext& ctx) {
 auto& ws_router = server->get_websocket_router();
 
 ws_router.add_handler(
-    "/chat",
+    "/chat/:room",
     // on_open
     [](WebsocketContext& ctx) {
+        auto room = ctx.get_path_param("room").value_or("lobby");
         ctx.send("Welcome to the chat!");
     },
     // on_message
@@ -141,6 +142,28 @@ ws_router.add_handler(
     }
 );
 ```
+
+WebSocket 路由和 HTTP 路由一样支持动态参数。最后一个参数可以包含 `/`，因此 `/gateway/:target` 能匹配 `/gateway/orders/ws/v1`。静态路由始终优先于动态路由。
+
+### 握手信息与帧类型
+
+```cpp
+ws_router.add_handler("/gateway/:target",
+    [](WebsocketContext& ctx) {
+        const auto& request = ctx.handshake(); // target/path/headers/query/subprotocols
+        auto authorization = ctx.get_header("Authorization");
+        auto cookies = ctx.get_headers("Cookie"); // 保留重复字段
+        auto trace = ctx.get_query_param("trace");
+    },
+    [](WebsocketContext& ctx) {
+        if (ctx.frame.type == WebsocketFrameType::binary) {
+            // payload 是原始字节，可包含 \0；不会转成文本帧。
+            ctx.send(ctx.frame);
+        }
+    });
+```
+
+`WebsocketFrame` 还可表示 ping、pong 和 close；close 帧包含 `close_code` 与 `close_reason`。
 
 ### 广播消息
 
@@ -188,6 +211,8 @@ ChatController::create()->register_routes(ws_router);
 
 ## 分块流式响应
 
+`HttpContext::chunked()` 适合服务端逐块生成响应，但请求体仍属于普通缓冲模型。需要流式上传、下载或代理时，应使用下一节的 `router.stream()`。
+
 ```cpp
 router.get("/stream/:count", [](HttpContext& ctx) {
     int count = std::stoi(ctx.get_path_param("count").value_or("10"));
@@ -206,6 +231,40 @@ router.get("/stream/:count", [](HttpContext& ctx) {
 ### 写入控制
 
 `WriteHandler` 返回 `false` 时停止写入（客户端已断开）。
+
+---
+
+## 双向 HTTP 流与大文件代理
+
+普通 JSON、form 和 multipart handler 需要完整请求体，默认最大 16 MiB。可以全局调整：
+
+```cpp
+server->set_max_buffered_request_body_size(32ULL * 1024 * 1024);
+```
+
+带 `Content-Length` 的超限请求会在读取 body、发送 `100 Continue` 之前返回 413；chunked 请求在累计越界时返回 413。大文件不要简单调高该上限，应注册流式路由：
+
+```cpp
+router.stream("/gateway/:target", http::verb::post,
+  [](HttpContext& ctx,
+     std::shared_ptr<HttpRequestStream> request,
+     std::shared_ptr<HttpResponseStream> response,
+     HttpStreamComplete)
+  {
+    client::HttpClientStream::RequestHead head{
+      ctx.method(), "/", ctx.get_request().version()};
+    for (const auto& field : ctx.get_request())
+      head.insert(field.name_string(), field.value());
+
+    auto proxy = std::make_shared<client::HttpProxySession>(
+      request, response, 64 * 1024);
+    proxy->start("http://upstream.internal/upload", std::move(head));
+  });
+```
+
+请求和响应各自只保持固定缓冲区，前一次写完成后才读取下一块。该模型支持 Content-Length、chunked、206 Range 响应和 hop-by-hop header 过滤。任一侧错误或取消时会联动取消其他方向。
+
+> 当前 `HttpClientStream` 仅支持 `http://` 上游；`https://` 会明确返回 `operation_not_supported`，不会回退为全量缓存。普通 `HttpClient` 支持 HTTPS。
 
 ---
 
