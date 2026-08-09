@@ -7,10 +7,25 @@
 #include <map>
 #include <any>
 #include <optional>
+#include <vector>
 
 namespace khttpd::framework
 {
   class WebsocketSession;
+
+  // HeaderList deliberately keeps duplicate fields (notably Cookie and
+  // Sec-WebSocket-Extensions) in their original handshake order.
+  using WebsocketHeaderList = std::vector<std::pair<std::string, std::string>>;
+
+  struct WebsocketHandshakeRequest
+  {
+    std::string target;
+    std::string path;
+    WebsocketHeaderList headers;
+    std::map<std::string, std::string> query_params;
+    std::vector<std::string> subprotocols;
+  };
+
   class WebsocketContext
   {
   public:
@@ -29,6 +44,13 @@ namespace khttpd::framework
                      boost::beast::error_code ec = {});
 
     void send(const std::string& msg, bool is_text = true);
+
+    const WebsocketHandshakeRequest& handshake() const;
+    std::optional<std::string> get_header(const std::string& name) const;
+    std::vector<std::string> get_headers(const std::string& name) const;
+    std::optional<std::string> get_query_param(const std::string& key) const;
+    std::optional<std::string> get_path_param(const std::string& key) const;
+    void set_path_params(std::map<std::string, std::string> params);
 
     void set_attribute(const std::string& key, std::any value) {
         extended_data[key] = std::move(value);
@@ -54,6 +76,9 @@ namespace khttpd::framework
         }
         return std::nullopt;
     }
+
+  private:
+    std::map<std::string, std::string> path_params_;
   };
 }
 #endif // KHTTPD_FRAMEWORK_WEBSOCKET_CONTEXT_HPP

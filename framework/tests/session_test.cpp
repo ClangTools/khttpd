@@ -218,3 +218,72 @@ TEST(HttpSessionTest, WebSocketDrainsQueuedMessages)
   EXPECT_EQ(first, "first");
   EXPECT_EQ(second, "second");
 }
+
+TEST(HttpSessionTest, WebSocketHandshakePreservesRoutingAndRequestMetadata)
+{
+  TempStaticTree tree;
+  net::io_context server_ioc;
+  khttpd_fw::HttpRouter router;
+  khttpd_fw::WebsocketRouter websocket_router;
+  std::mutex captured_mutex;
+  std::string target_param;
+  khttpd_fw::WebsocketHandshakeRequest captured;
+  std::atomic<bool> opened{false};
+  std::atomic<bool> closed{false};
+
+  websocket_router.add_handler("/gateway/:target", [&](khttpd_fw::WebsocketContext& ctx)
+  {
+    std::lock_guard<std::mutex> lock(captured_mutex);
+    target_param = ctx.get_path_param("target").value_or("");
+    captured = ctx.handshake();
+    opened = true;
+  }, nullptr, [&](khttpd_fw::WebsocketContext&) { closed = true; });
+
+  tcp::acceptor acceptor(server_ioc, {net::ip::make_address("127.0.0.1"), 0});
+  const auto endpoint = acceptor.local_endpoint();
+  const auto canonical_web_root = fs::canonical(tree.web);
+  acceptor.async_accept([&](beast::error_code ec, tcp::socket socket)
+  {
+    ASSERT_FALSE(ec) << ec.message();
+    std::make_shared<khttpd_fw::HttpSession>(
+      std::move(socket), router, websocket_router, tree.web.string(), canonical_web_root)->run();
+  });
+  std::thread server_thread([&] { server_ioc.run(); });
+
+  net::io_context client_ioc;
+  websocket::stream<tcp::socket> client(client_ioc);
+  client.set_option(websocket::stream_base::decorator([](websocket::request_type& request)
+  {
+    request.set(http::field::authorization, "Bearer test-token");
+    request.insert(http::field::cookie, "first=1");
+    request.insert(http::field::cookie, "second=2");
+    request.set(http::field::origin, "https://gateway-client.example");
+    request.set(http::field::sec_websocket_protocol, "chat, telemetry");
+  }));
+  client.next_layer().connect(endpoint);
+  client.handshake("127.0.0.1", "/gateway/orders/ws?tenant=acme&trace=abc");
+
+  for (int i = 0; i < 100 && !opened; ++i)
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  beast::error_code ignored;
+  client.close(websocket::close_code::normal, ignored);
+  for (int i = 0; i < 100 && !closed; ++i)
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  server_ioc.stop();
+  server_thread.join();
+
+  ASSERT_TRUE(opened);
+  ASSERT_TRUE(closed);
+  std::lock_guard<std::mutex> lock(captured_mutex);
+  EXPECT_EQ(target_param, "orders/ws");
+  EXPECT_EQ(captured.target, "/gateway/orders/ws?tenant=acme&trace=abc");
+  EXPECT_EQ(captured.path, "/gateway/orders/ws");
+  EXPECT_EQ(captured.query_params.at("tenant"), "acme");
+  EXPECT_EQ(captured.query_params.at("trace"), "abc");
+  EXPECT_EQ(captured.subprotocols, (std::vector<std::string>{"chat", "telemetry"}));
+
+  std::vector<std::string> cookies;
+  for (const auto& [name, value] : captured.headers)
+    if (name == "Cookie") cookies.push_back(value);
+  EXPECT_EQ(cookies, (std::vector<std::string>{"first=1", "second=2"}));
+}
