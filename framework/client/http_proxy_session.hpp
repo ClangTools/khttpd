@@ -15,9 +15,18 @@ namespace khttpd::framework::client
     HttpProxySession(std::shared_ptr<HttpRequestStream> inbound,
                      std::shared_ptr<HttpResponseStream> downstream,
                      std::size_t buffer_size = 64 * 1024);
+    HttpProxySession(std::shared_ptr<HttpRequestStream> inbound,
+                     std::shared_ptr<HttpResponseStream> downstream,
+                     boost::asio::ssl::context& ssl_context,
+                     std::size_t buffer_size = 64 * 1024);
     HttpProxySession(boost::asio::io_context& ioc,
                      std::shared_ptr<HttpRequestStream> inbound,
                      std::shared_ptr<HttpResponseStream> downstream,
+                     std::size_t buffer_size = 64 * 1024);
+    HttpProxySession(boost::asio::io_context& ioc,
+                     std::shared_ptr<HttpRequestStream> inbound,
+                     std::shared_ptr<HttpResponseStream> downstream,
+                     boost::asio::ssl::context& ssl_context,
                      std::size_t buffer_size = 64 * 1024);
     void start(const std::string& upstream_url, HttpClientStream::RequestHead head,
                CompleteCallback callback = {});

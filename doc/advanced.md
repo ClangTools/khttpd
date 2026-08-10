@@ -264,7 +264,7 @@ router.stream("/gateway/:target", http::verb::post,
 
 请求和响应各自只保持固定缓冲区，前一次写完成后才读取下一块。该模型支持 Content-Length、chunked、206 Range 响应和 hop-by-hop header 过滤。任一侧错误或取消时会联动取消其他方向。
 
-> 当前 `HttpClientStream` 仅支持 `http://` 上游；`https://` 会明确返回 `operation_not_supported`，不会回退为全量缓存。普通 `HttpClient` 支持 HTTPS。
+`HttpClientStream` 和 `HttpProxySession` 同时支持 `http://` 与 `https://`，两种传输都保持固定缓冲模型。默认 TLS context 使用系统信任库并校验证书；私有 CA 可通过接受 `ssl::context&` 的构造函数注入。
 
 ---
 

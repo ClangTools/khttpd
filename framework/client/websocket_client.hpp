@@ -56,6 +56,8 @@ namespace khttpd::framework::client
 
     // 配置
     void set_header(const std::string& key, const std::string& value);
+    void set_subprotocols(const std::vector<std::string>& subprotocols);
+    std::string negotiated_subprotocol() const;
     void set_on_message(MessageHandler handler);
     void set_on_frame(FrameHandler handler);
     void set_on_error(ErrorHandler handler);

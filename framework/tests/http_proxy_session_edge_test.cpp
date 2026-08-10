@@ -41,7 +41,7 @@ namespace
   };
 }
 
-TEST(HttpProxySessionEdgeTest, UpstreamStartFailureCancelsBothDownstreamSides)
+TEST(HttpProxySessionEdgeTest, UnsupportedUpstreamSchemeCancelsBothDownstreamSides)
 {
   net::io_context ioc;
   auto inbound = std::make_shared<ObservableRequestStream>();
@@ -51,7 +51,7 @@ TEST(HttpProxySessionEdgeTest, UpstreamStartFailureCancelsBothDownstreamSides)
   boost::system::error_code result;
   bool completed = false;
 
-  proxy->start("https://unsupported.test/upload", std::move(head),
+  proxy->start("ftp://unsupported.test/upload", std::move(head),
                [&](boost::system::error_code ec) { result = ec; completed = true; });
   ioc.run();
 

@@ -49,10 +49,23 @@ namespace khttpd::framework::client
     : HttpProxySession(IoContextPool::instance().get_io_context(), std::move(inbound),
                        std::move(downstream), buffer_size) {}
 
+  HttpProxySession::HttpProxySession(std::shared_ptr<HttpRequestStream> inbound,
+                                     std::shared_ptr<HttpResponseStream> downstream,
+                                     net::ssl::context& ssl_context, std::size_t buffer_size)
+    : HttpProxySession(IoContextPool::instance().get_io_context(), std::move(inbound),
+                       std::move(downstream), ssl_context, buffer_size) {}
+
   HttpProxySession::HttpProxySession(net::io_context& ioc, std::shared_ptr<HttpRequestStream> inbound,
                                      std::shared_ptr<HttpResponseStream> downstream, std::size_t buffer_size)
     : inbound_(std::move(inbound)), downstream_(std::move(downstream)),
       upstream_(std::make_shared<HttpClientStream>(ioc)),
+      request_buffer_(buffer_size), response_buffer_(buffer_size) {}
+
+  HttpProxySession::HttpProxySession(net::io_context& ioc, std::shared_ptr<HttpRequestStream> inbound,
+                                     std::shared_ptr<HttpResponseStream> downstream,
+                                     net::ssl::context& ssl_context, std::size_t buffer_size)
+    : inbound_(std::move(inbound)), downstream_(std::move(downstream)),
+      upstream_(std::make_shared<HttpClientStream>(ioc, ssl_context)),
       request_buffer_(buffer_size), response_buffer_(buffer_size) {}
 
   void HttpProxySession::start(const std::string& url, HttpClientStream::RequestHead head, CompleteCallback callback)

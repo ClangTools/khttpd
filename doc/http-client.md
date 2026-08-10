@@ -191,7 +191,7 @@ stream->async_start("http://storage.internal/upload", std::move(head),
 
 同一方向必须串行调用：等待当前 read/write 回调后再提交下一块。这既限制 in-flight 数据，也让 TCP 自然提供背压。调用 `cancel()` 会取消解析、连接和未完成 I/O。
 
-当前流式客户端只支持 `http://`。`https://` 返回 `operation_not_supported`，且不会回退到全量缓存；普通 `HttpClient` 的 HTTPS 能力不受影响。
+流式客户端同时支持 `http://` 和 `https://`，TLS 不会回退到全量缓存。默认构造函数使用系统信任库并校验证书；私有 CA 或测试环境可以使用 `HttpClientStream(ioc, ssl_context)` 注入自定义 context。
 
 ---
 
@@ -218,6 +218,9 @@ ws->set_on_frame([](const WebsocketFrame& frame) {
     }
 });
 
+// 请求子协议；连接后可读取服务端最终选择的协议。
+ws->set_subprotocols({"chat.v1", "chat.v2"});
+
 ws->set_on_error([](beast::error_code ec) {
     if (ec != boost::asio::error::operation_aborted) {
         fmt::print(stderr, "WS Error: {}\n", ec.message());
@@ -229,8 +232,9 @@ ws->set_on_close([]() {
 });
 
 // 连接
-ws->connect("wss://echo.websocket.org", [](beast::error_code ec) {
+ws->connect("wss://echo.websocket.org", [ws](beast::error_code ec) {
     if (!ec) {
+        fmt::print("protocol: {}\n", ws->negotiated_subprotocol());
         fmt::print("Connected!\n");
     }
 });

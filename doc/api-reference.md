@@ -408,7 +408,7 @@ public:
 | `async_read_some(buffer, callback)` | 固定缓冲区读取响应体 |
 | `cancel()` | 取消解析、连接和未完成 I/O |
 
-当前流式客户端仅支持 `http://`。`https://` 会返回 `operation_not_supported`，不会退化成 `string_body` 全量缓存。普通 `HttpClient` 仍支持 HTTPS。
+流式客户端支持 `http://` 和 `https://`，TLS 传输仍使用同一套固定缓冲 serializer/parser。默认 context 校验系统信任库；也可通过 `HttpClientStream(ssl_context)` 或 `HttpClientStream(ioc, ssl_context)` 注入私有 CA 配置。
 
 ### HttpProxySession
 
@@ -486,6 +486,8 @@ API_CALL(http::verb::get, "/users/:id", get_user,
 | `send(message)` | 发送消息（线程安全） |
 | `close()` | 关闭连接 |
 | `set_header(key, value)` | 设置握手头 |
+| `set_subprotocols(protocols)` | 设置 `Sec-WebSocket-Protocol` 请求列表 |
+| `negotiated_subprotocol()` | 返回握手响应中服务端最终选择的子协议 |
 | `set_on_message(handler)` | 设置消息回调 |
 | `set_on_frame(handler)` | 设置保留 text/binary/control 类型的帧回调 |
 | `set_on_error(handler)` | 设置错误回调 |

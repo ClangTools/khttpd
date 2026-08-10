@@ -172,6 +172,13 @@ cc_test(
 )
 
 cc_test(
+    name = "websocket_client_handshake_test",
+    srcs = ["websocket_client_handshake_test.cpp"],
+    copts = ["-std=c++17", "-Wall", "-pedantic"],
+    deps = ["//framework", "@googletest//:gtest", "@googletest//:gtest_main"],
+)
+
+cc_test(
     name = "server_stability_test",
     srcs = ["server_stability_test.cpp"],
     copts = select({

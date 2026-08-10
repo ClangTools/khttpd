@@ -257,9 +257,10 @@ bodies above the configurable limit (16 MiB by default; use
 subject to this buffered-body limit and have no size-dependent allocation;
 the proxy buffer defaults to 64 KiB and can be configured in its constructor.
 
-`HttpClientStream` currently accepts `http://` upstream URLs only. It returns
-`operation_not_supported` for `https://` and never silently falls back to a
-fully buffered request. The regular `HttpClient` continues to support HTTPS.
+`HttpClientStream` supports both `http://` and `https://` without changing its
+fixed-buffer behavior. Its default TLS context verifies the system trust store;
+an application can inject an `ssl::context` into `HttpClientStream` or
+`HttpProxySession` for private CAs and test certificates.
 
 ### Tests
 
