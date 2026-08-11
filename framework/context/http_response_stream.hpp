@@ -16,6 +16,8 @@ namespace khttpd::framework
     virtual void async_start(ResponseHead head, Callback callback) = 0;
     virtual void async_write_some(boost::asio::const_buffer buffer, Callback callback) = 0;
     virtual void async_finish(Callback callback) = 0;
+    // Stops an inbound request-body read while preserving this response stream.
+    virtual void cancel_request_body() { cancel(); }
     virtual void cancel() = 0;
   };
 }

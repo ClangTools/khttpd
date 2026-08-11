@@ -61,6 +61,8 @@ namespace khttpd::framework
     std::optional<http::response_serializer<http::buffer_body>> streaming_response_serializer_;
     std::shared_ptr<HttpContext> ctx = nullptr;
     bool stream_completed_ = false;
+    std::optional<tcp::endpoint> peer_endpoint_;
+    bool request_body_cancelled_ = false;
 
     // Chunked streaming support
     std::shared_ptr<std::queue<std::string>> chunk_queue_;
@@ -77,12 +79,15 @@ namespace khttpd::framework
     void handle_stream_request();
     void async_read_stream_body(net::mutable_buffer target, HttpRequestStream::ReadCallback callback);
     void cancel_stream_body();
+    void cancel_session();
     void start_stream_response(HttpResponseStream::ResponseHead head, HttpResponseStream::Callback callback);
     void write_stream_response(net::const_buffer source, HttpResponseStream::Callback callback);
     void finish_stream_response(HttpResponseStream::Callback callback);
     void on_read(const beast::error_code& ec, std::size_t bytes_transferred);
 
     void handle_request();
+    void dispatch_request_after_interceptors(InterceptorResult result);
+    void send_context_response();
     // 新增：尝试处理静态文件请求
     bool do_serve_static_file();
 

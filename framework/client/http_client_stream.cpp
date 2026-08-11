@@ -43,7 +43,8 @@ namespace khttpd::framework::client
     beast::flat_buffer read_buffer;
     http::request<http::buffer_body> request;
     std::optional<http::request_serializer<http::buffer_body>> request_serializer;
-    http::response_parser<http::buffer_body> response_parser;
+    std::optional<http::response_parser<http::buffer_body>> response_parser;
+    http::verb request_method = http::verb::unknown;
     std::string host;
     std::string port;
     bool use_tls = false;
@@ -53,7 +54,6 @@ namespace khttpd::framework::client
     Impl(net::io_context& ioc, std::shared_ptr<ssl::context> context)
       : executor(net::make_strand(ioc)), resolver(executor), ssl_context(std::move(context))
     {
-      response_parser.body_limit((std::numeric_limits<std::uint64_t>::max)());
     }
 
     void start(const std::string& url, RequestHead head, Callback callback)
@@ -76,6 +76,7 @@ namespace khttpd::framework::client
       if (target.empty()) target = "/";
       else if (target.front() == '?') target.insert(target.begin(), '/');
       request.method(head.method());
+      request_method = head.method();
       request.target(target);
       request.version(head.version());
       request.keep_alive(head.keep_alive());
@@ -204,17 +205,26 @@ namespace khttpd::framework::client
     template <class Stream>
     void async_read_head(Stream& stream, ResponseHeadCallback callback)
     {
-      http::async_read_header(stream, read_buffer, response_parser,
+      response_parser.emplace();
+      response_parser->body_limit((std::numeric_limits<std::uint64_t>::max)());
+      response_parser->skip(request_method == http::verb::head);
+      http::async_read_header(stream, read_buffer, *response_parser,
         [self = shared_from_this(), callback = std::move(callback)](beast::error_code ec, std::size_t) mutable
         {
           ResponseHead head;
           if (!ec)
           {
-            const auto& source = self->response_parser.get();
+            const auto& source = self->response_parser->get();
             head.result(source.result());
             head.version(source.version());
             head.keep_alive(source.keep_alive());
             for (const auto& field : source) head.insert(field.name_string(), field.value());
+            if (head.result_int() >= 100 && head.result_int() < 200 &&
+                head.result() != http::status::switching_protocols)
+            {
+              if (self->use_tls) return self->async_read_head(*self->tls_stream, std::move(callback));
+              return self->async_read_head(*self->plain_stream, std::move(callback));
+            }
           }
           callback(ec, std::move(head));
         });
@@ -229,8 +239,9 @@ namespace khttpd::framework::client
     void read_on_executor(net::mutable_buffer target, ReadCallback callback)
     {
       if (!started) return callback(net::error::operation_aborted, 0, true);
-      if (response_parser.is_done()) return callback({}, 0, true);
-      auto& body = response_parser.get().body();
+      if (!response_parser) return callback(net::error::operation_aborted, 0, true);
+      if (response_parser->is_done()) return callback({}, 0, true);
+      auto& body = response_parser->get().body();
       body.data = target.data();
       body.size = target.size();
       if (use_tls) async_read_body(*tls_stream, target.size(), std::move(callback));
@@ -240,13 +251,13 @@ namespace khttpd::framework::client
     template <class Stream>
     void async_read_body(Stream& stream, std::size_t capacity, ReadCallback callback)
     {
-      http::async_read_some(stream, read_buffer, response_parser,
+      http::async_read_some(stream, read_buffer, *response_parser,
         [self = shared_from_this(), capacity, callback = std::move(callback)]
         (beast::error_code ec, std::size_t) mutable
         {
           if (ec == http::error::need_buffer) ec = {};
-          const auto produced = capacity - self->response_parser.get().body().size;
-          callback(ec, produced, self->response_parser.is_done());
+          const auto produced = capacity - self->response_parser->get().body().size;
+          callback(ec, produced, self->response_parser->is_done());
         });
     }
 

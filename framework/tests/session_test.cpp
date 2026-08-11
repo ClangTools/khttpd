@@ -199,6 +199,69 @@ TEST(HttpSessionTest, StaticHeadReturnsHeadersWithoutBody)
   EXPECT_EQ(res[http::field::content_length], "5");
 }
 
+TEST(HttpSessionTest, DynamicHeadUsesGetMetadataWithoutSendingBody)
+{
+  TempStaticTree tree;
+  khttpd_fw::HttpRouter router;
+  khttpd_fw::WebsocketRouter websocket_router;
+  router.get("/resource", [](khttpd_fw::HttpContext& ctx) { ctx.set_body("generated-body"); });
+  http::request<http::string_body> req{http::verb::head, "/resource", 11};
+  req.keep_alive(false);
+  auto res = round_trip<http::empty_body>(router, websocket_router, tree.web, std::move(req), true);
+  EXPECT_EQ(res.result(), http::status::ok);
+  EXPECT_EQ(res[http::field::content_length], "14");
+}
+
+TEST(HttpSessionTest, AsyncInterceptorSeesTransportPeerAndCanDenyRequest)
+{
+  struct RemoteAuth final : khttpd_fw::Interceptor
+  {
+    std::optional<tcp::endpoint> seen_peer;
+    void async_handle_request(khttpd_fw::HttpContext& ctx, RequestCompletion complete) override
+    {
+      seen_peer = ctx.peer_endpoint();
+      ctx.set_status(http::status::unauthorized);
+      ctx.set_body("remote auth denied");
+      std::thread([complete = std::move(complete)] { complete(khttpd_fw::InterceptorResult::Stop); }).detach();
+    }
+  };
+  TempStaticTree tree;
+  khttpd_fw::HttpRouter router;
+  khttpd_fw::WebsocketRouter websocket_router;
+  auto auth = std::make_shared<RemoteAuth>();
+  router.add_interceptor(auth);
+  router.get("/private", [](khttpd_fw::HttpContext& ctx) { ctx.set_body("should not run"); });
+  http::request<http::string_body> req{http::verb::get, "/private", 11};
+  req.keep_alive(false);
+  auto res = round_trip<http::string_body>(router, websocket_router, tree.web, std::move(req));
+  EXPECT_EQ(res.result(), http::status::unauthorized);
+  EXPECT_EQ(res.body(), "remote auth denied");
+  ASSERT_TRUE(auth->seen_peer);
+  EXPECT_TRUE(auth->seen_peer->address().is_loopback());
+  EXPECT_NE(auth->seen_peer->port(), 0);
+}
+
+TEST(HttpSessionTest, AsyncRouteCompletesResponseFromAnotherThread)
+{
+  TempStaticTree tree;
+  khttpd_fw::HttpRouter router;
+  khttpd_fw::WebsocketRouter websocket_router;
+  router.async_route("/remote", http::verb::get,
+    [](khttpd_fw::HttpContext& ctx, khttpd_fw::HttpAsyncComplete complete)
+    {
+      std::thread([&ctx, complete = std::move(complete)]() mutable
+      {
+        ctx.set_body("async result");
+        complete();
+      }).detach();
+    });
+  http::request<http::string_body> req{http::verb::get, "/remote", 11};
+  req.keep_alive(false);
+  auto res = round_trip<http::string_body>(router, websocket_router, tree.web, std::move(req));
+  EXPECT_EQ(res.result(), http::status::ok);
+  EXPECT_EQ(res.body(), "async result");
+}
+
 TEST(HttpSessionTest, ChunkedResponseCompletesWithSingleIoThread)
 {
   TempStaticTree tree;
@@ -436,6 +499,48 @@ TEST(HttpSessionTest, WebSocketDrainsQueuedMessages)
   EXPECT_TRUE(closed);
   EXPECT_EQ(first, "first");
   EXPECT_EQ(second, "second");
+}
+
+TEST(HttpSessionTest, WebSocketUpgradeRunsHttpAuthenticationFirst)
+{
+  struct DenyUpgrade final : khttpd_fw::Interceptor
+  {
+    khttpd_fw::InterceptorResult handle_request(khttpd_fw::HttpContext& ctx) override
+    {
+      ctx.set_status(http::status::unauthorized);
+      ctx.set_body("websocket auth required");
+      return khttpd_fw::InterceptorResult::Stop;
+    }
+  };
+  TempStaticTree tree;
+  net::io_context server_ioc;
+  khttpd_fw::HttpRouter router;
+  khttpd_fw::WebsocketRouter websocket_router;
+  router.add_interceptor(std::make_shared<DenyUpgrade>());
+  bool opened = false;
+  websocket_router.add_handler("/private-ws", [&](khttpd_fw::WebsocketContext&) { opened = true; });
+  tcp::acceptor acceptor(server_ioc, {net::ip::address_v4::loopback(), 0});
+  const auto endpoint = acceptor.local_endpoint();
+  acceptor.async_accept([&](beast::error_code ec, tcp::socket socket)
+  {
+    ASSERT_FALSE(ec);
+    std::make_shared<khttpd_fw::HttpSession>(std::move(socket), router, websocket_router,
+      tree.web.string(), fs::canonical(tree.web))->run();
+  });
+  std::thread server_thread([&] { server_ioc.run(); });
+  net::io_context client_ioc;
+  websocket::stream<tcp::socket> client(client_ioc);
+  client.next_layer().connect(endpoint);
+  websocket::response_type response;
+  beast::error_code ec;
+  client.handshake(response, "127.0.0.1", "/private-ws", ec);
+  EXPECT_TRUE(ec);
+  EXPECT_EQ(response.result(), http::status::unauthorized);
+  EXPECT_FALSE(opened);
+  beast::error_code ignored;
+  client.next_layer().close(ignored);
+  server_ioc.stop();
+  server_thread.join();
 }
 
 TEST(HttpSessionTest, WebSocketHandshakePreservesRoutingAndRequestMetadata)

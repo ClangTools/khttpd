@@ -60,6 +60,8 @@ server->run();
 | `get_path_param(key)` | `std::optional<std::string>` | 路径参数，如 `/users/:id` 中的 `id` |
 | `get_header(name)` | `std::optional<std::string>` | 请求头（支持 `http::field` 枚举和字符串） |
 | `get_headers(name)` | `std::optional<std::vector<std::string>>` | 同名请求头列表 |
+| `peer_endpoint()` | `const std::optional<tcp::endpoint>&` | TCP 真实对端；不受 `X-Forwarded-For` 伪造影响 |
+| `peer_address()` | `std::optional<ip::address>` | TCP 真实对端地址，适合可信代理判断和 IP 限流 |
 
 ### Cookie 操作
 
@@ -145,6 +147,7 @@ struct MultipartFile {
 | `del(path, handler)` | 注册 DELETE 路由 |
 | `options(path, handler)` | 注册 OPTIONS 路由 |
 | `stream(path, method, handler)` | 注册在读取完整 body 前分发的流式路由 |
+| `async_route(path, method, handler)` | 注册异步路由；handler 完成时调用一次 `complete()` |
 
 `handler` 签名：`void(HttpContext&)`
 
@@ -286,9 +289,11 @@ enum class InterceptorResult { Continue, Stop };
 | 方法 | 默认返回 | 调用时机 |
 |------|----------|----------|
 | `handle_request(ctx)` | `Continue` | 路由处理前，按添加顺序执行 |
+| `async_handle_request(ctx, complete)` | 调用同步 `handle_request` | 异步前置检查；完成时调用一次 `complete(result)` |
 | `handle_response(ctx)` | 空 | 响应生成后，按添加**逆序**执行 |
 
 返回 `Stop` 时中断后续拦截器和路由处理器，直接执行后置拦截器。
+HTTP 与 WebSocket Upgrade 都会执行同一条前置拦截器链。
 
 ---
 
@@ -384,6 +389,7 @@ public:
 | 方法 | 说明 |
 |------|------|
 | `async_read_some(buffer, callback)` | 将下一段请求体读入调用方缓冲区；回调参数为 `(ec, bytes, done)` |
+| `cancel_read()` | 只取消请求体读取；响应通道仍可发送，连接随后以非 keep-alive 结束 |
 | `cancel()` | 取消读取并关闭对应连接 |
 
 同一个方向必须等待前一次回调完成后再发起下一次读取。
@@ -395,6 +401,7 @@ public:
 | `async_start(head, callback)` | 发送响应头；未指定 Content-Length/Chunked 时自动使用 chunked |
 | `async_write_some(buffer, callback)` | 发送一段响应体 |
 | `async_finish(callback)` | 完成响应体并写入终止块（如需要） |
+| `cancel_request_body()` | 只取消配对的请求体读取，保留响应通道 |
 | `cancel()` | 取消下游响应 |
 
 ### HttpClientStream
@@ -409,6 +416,7 @@ public:
 | `cancel()` | 取消解析、连接和未完成 I/O |
 
 流式客户端支持 `http://` 和 `https://`，TLS 传输仍使用同一套固定缓冲 serializer/parser。默认 context 校验系统信任库；也可通过 `HttpClientStream(ssl_context)` 或 `HttpClientStream(ioc, ssl_context)` 注入私有 CA 配置。
+客户端会跳过连续的 100/103 等 informational response，向调用方交付最终响应；HEAD 按响应头完成，不等待 `Content-Length` 指示的正文。
 
 ### HttpProxySession
 

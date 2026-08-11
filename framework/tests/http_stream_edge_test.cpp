@@ -81,3 +81,37 @@ TEST(HttpStreamEdgeTest, ChunkedBodyCrossingManySmallReadsPreservesByteCount)
   EXPECT_EQ(response.result(), http::status::ok);
   EXPECT_EQ(response.body(), "103");
 }
+
+TEST(HttpStreamEdgeTest, CancellingRequestBodyKeepsResponseChannelUsable)
+{
+  test::TempWebRoot web_root;
+  fw::HttpRouter router;
+  fw::WebsocketRouter websocket_router;
+  router.stream("/early", http::verb::post,
+    [](fw::HttpContext&, std::shared_ptr<fw::HttpRequestStream>,
+       std::shared_ptr<fw::HttpResponseStream> response, fw::HttpStreamComplete)
+    {
+      response->cancel_request_body();
+      fw::HttpResponseStream::ResponseHead head{http::status::forbidden, 11};
+      head.content_length(6);
+      head.keep_alive(false);
+      response->async_start(std::move(head), [response](boost::system::error_code ec)
+      {
+        ASSERT_FALSE(ec) << ec.message();
+        static constexpr char denied[] = "denied";
+        response->async_write_some(net::buffer(denied, 6), [response](boost::system::error_code write_ec)
+        {
+          ASSERT_FALSE(write_ec) << write_ec.message();
+          response->async_finish([](boost::system::error_code finish_ec)
+          { ASSERT_FALSE(finish_ec) << finish_ec.message(); });
+        });
+      });
+    });
+  http::request<http::string_body> request{http::verb::post, "/early", 11};
+  request.body().assign(4096, 'x');
+  request.prepare_payload();
+  request.keep_alive(false);
+  const auto response = test::round_trip(router, websocket_router, web_root.path, std::move(request), 0);
+  EXPECT_EQ(response.result(), http::status::forbidden);
+  EXPECT_EQ(response.body(), "denied");
+}

@@ -44,6 +44,24 @@ Request → Interceptor1.handle_request → Interceptor2.handle_request → Hand
 - **前置拦截器**：按注册**正序**执行
 - **后置拦截器**：按注册**逆序**执行（洋葱模型）
 - 任一前置返回 `Stop` → 跳过剩余前置和 handler → 执行全部后置
+- WebSocket Upgrade 在握手前也执行这条链，因此可复用 HTTP 鉴权
+
+远程鉴权可覆盖异步入口，完成回调可以从任意线程调用，但必须恰好调用一次：
+
+```cpp
+void async_handle_request(HttpContext& ctx, RequestCompletion complete) override {
+    auth_client.check(ctx.get_header("Authorization"),
+      [&ctx, complete = std::move(complete)](bool allowed) mutable {
+        if (!allowed) {
+            ctx.set_status(http::status::unauthorized);
+            ctx.set_body("Unauthorized");
+        }
+        complete(allowed ? InterceptorResult::Continue : InterceptorResult::Stop);
+      });
+}
+```
+
+做可信 `X-Forwarded-For` 解析时，应先用 `ctx.peer_endpoint()` 判断直连 peer 是否属于受信代理网段；IP 限流的默认 key 应使用 `ctx.peer_address()`，不能直接信任请求头。
 
 ### 上下文数据传递
 
@@ -263,6 +281,8 @@ router.stream("/gateway/:target", http::verb::post,
 ```
 
 请求和响应各自只保持固定缓冲区，前一次写完成后才读取下一块。该模型支持 Content-Length、chunked、206 Range 响应和 hop-by-hop header 过滤。任一侧错误或取消时会联动取消其他方向。
+
+若上游已提前拒绝请求，可调用 `request->cancel_read()` 或 `response->cancel_request_body()`。这只终止入站请求体读取，响应仍可正常写回；为避免未消费字节污染下一条请求，该连接不会再 keep-alive。
 
 `HttpClientStream` 和 `HttpProxySession` 同时支持 `http://` 与 `https://`，两种传输都保持固定缓冲模型。默认 TLS context 使用系统信任库并校验证书；私有 CA 可通过接受 `ssl::context&` 的构造函数注入。
 

@@ -17,6 +17,8 @@ namespace khttpd::framework
     virtual ~HttpRequestStream() = default;
 
     virtual void async_read_some(boost::asio::mutable_buffer buffer, ReadCallback callback) = 0;
+    // Cancels only request-body consumption. The response side remains usable.
+    virtual void cancel_read() { cancel(); }
     virtual void cancel() = 0;
   };
 }

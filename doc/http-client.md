@@ -193,6 +193,8 @@ stream->async_start("http://storage.internal/upload", std::move(head),
 
 流式客户端同时支持 `http://` 和 `https://`，TLS 不会回退到全量缓存。默认构造函数使用系统信任库并校验证书；私有 CA 或测试环境可以使用 `HttpClientStream(ioc, ssl_context)` 注入自定义 context。
 
+缓冲和流式客户端都会连续消费上游 `100 Continue`、`103 Early Hints` 等 1xx 响应，并只返回最终响应。HEAD 请求在最终响应头后即完成，即使响应包含非零 `Content-Length` 也不会等待正文。
+
 ---
 
 ## WebSocket 客户端
