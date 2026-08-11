@@ -33,12 +33,12 @@ and [Boost.Asio](https://www.boost.org/doc/libs/release/libs/asio/), managed wit
 
 | Component           | Version        |
 |---------------------|----------------|
-| Boost               | 1.89.0         |
-| Boost.Beast         | 1.89.0         |
-| Boost.Asio          | 1.89.0         |
-| fmt                 | 12.0.0         |
-| OpenSSL / BoringSSL | 3.3.1 / latest |
-| SQLite3             | 3.50.4         |
+| Boost               | 1.90.0         |
+| Boost.Beast         | 1.90.0         |
+| Boost.Asio          | 1.90.0         |
+| fmt                 | 12.1.0         |
+| OpenSSL / BoringSSL | 4.0.1 / 0.20260616.0 |
+| SQLite3             | 3.53.2         |
 | Build System        | Bazel (bzlmod) |
 
 ## Quick Start
@@ -50,21 +50,23 @@ In your project's `MODULE.bazel`:
 ```python
 http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
-bazel_dep(name="platforms", version="1.0.0")
-bazel_dep(name="rules_cc", version="0.2.13")
-bazel_dep(name="fmt", version="12.0.0")
-bazel_dep(name="boost", version="1.89.0.bcr.2")
-bazel_dep(name="boost.asio", version="1.89.0.bcr.2")
-bazel_dep(name="boost.beast", version="1.89.0.bcr.2")
-bazel_dep(name="boost.json", version="1.89.0.bcr.2")
-bazel_dep(name="boost.filesystem", version="1.89.0.bcr.2")
-bazel_dep(name="boost.url", version="1.89.0.bcr.2")
-bazel_dep(name="boringssl", version="0.20251110.0")
+bazel_dep(name="platforms", version="1.1.0")
+bazel_dep(name="rules_cc", version="0.2.20")
+bazel_dep(name="fmt", version="12.1.0")
+bazel_dep(name="boost", version="1.90.0.bcr.1")
+bazel_dep(name="boost.asio", version="1.90.0.bcr.1")
+bazel_dep(name="boost.beast", version="1.90.0.bcr.1")
+bazel_dep(name="boost.json", version="1.90.0.bcr.1")
+bazel_dep(name="boost.filesystem", version="1.90.0.bcr.1")
+bazel_dep(name="boost.url", version="1.90.0.bcr.1")
+bazel_dep(name="boost.uuid", version="1.90.0.bcr.1")
+bazel_dep(name="boringssl", version="0.20260616.0")
+bazel_dep(name="spdlog", version="1.17.0")
 
 http_archive(
   name="khttpd",
-  strip_prefix="khttpd-0.1.0",
-  url="https://github.com/ClangTools/khttpd/archive/refs/tags/v0.1.0.tar.gz",
+  strip_prefix="khttpd-0.3.0",
+  url="https://github.com/ClangTools/khttpd/archive/refs/tags/v0.3.0.tar.gz",
 )
 ```
 
