@@ -63,14 +63,36 @@ namespace khttpd::framework
       if (!descriptor.documentation.description.empty())
         operation.emplace("description", descriptor.documentation.description);
       boost::json::array parameters;
+      const auto find_parameter = [&](const RouteParameterLocation location,
+                                      const std::string& name) -> const RouteParameterDocumentation*
+      {
+        const auto it = std::find_if(descriptor.parameters.begin(), descriptor.parameters.end(),
+          [&](const RouteParameterDocumentation& parameter)
+          {
+            return parameter.location == location && parameter.name == name;
+          });
+        return it == descriptor.parameters.end() ? nullptr : &*it;
+      };
       for (std::size_t index = 0; index < path_parameters.size(); ++index)
       {
         boost::json::object parameter;
         parameter.emplace("name", path_parameters[index]);
         parameter.emplace("in", "path");
         parameter.emplace("required", true);
-        parameter.emplace("schema", boost::json::object{{"type", "string"}});
+        const auto* documented = find_parameter(RouteParameterLocation::path, path_parameters[index]);
+        parameter.emplace("schema", documented != nullptr ? documented->schema :
+                          boost::json::value(boost::json::object{{"type", "string"}}));
         if (index + 1 == path_parameters.size()) parameter.emplace("x-khttpd-greedy", true);
+        parameters.emplace_back(std::move(parameter));
+      }
+      for (const auto& documented : descriptor.parameters)
+      {
+        if (documented.location != RouteParameterLocation::query) continue;
+        boost::json::object parameter;
+        parameter.emplace("name", documented.name);
+        parameter.emplace("in", "query");
+        parameter.emplace("required", documented.required);
+        parameter.emplace("schema", documented.schema);
         parameters.emplace_back(std::move(parameter));
       }
       for (const auto& header : descriptor.documentation.headers)
