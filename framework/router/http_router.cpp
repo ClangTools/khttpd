@@ -1,5 +1,6 @@
 // framework/router/http_router.cpp
 #include "http_router.hpp"
+#include "sse/sse_session.hpp"
 #include <fmt/core.h>
 #include <spdlog/spdlog.h>
 #include <algorithm>
@@ -331,6 +332,22 @@ namespace khttpd::framework
       return entry.stream_handlers.find(method) != entry.stream_handlers.end();
     }
     return false;
+  }
+
+  void HttpRouter::sse(const std::string& path, SseHandler handler, const std::size_t max_pending_bytes)
+  {
+    stream(path, boost::beast::http::verb::get,
+      [handler = std::move(handler), max_pending_bytes](HttpContext& ctx, std::shared_ptr<HttpRequestStream>,
+                                     std::shared_ptr<HttpResponseStream> response, HttpStreamComplete)
+      {
+        const auto content_length = ctx.get_request()[boost::beast::http::field::content_length];
+        if (ctx.get_request().chunked() || (!content_length.empty() && content_length != "0"))
+          response->cancel_request_body();
+        auto session = std::make_shared<sse::SseSession>(std::move(response), ctx.get_request().version(),
+                                                        ctx.get_request().keep_alive(), max_pending_bytes);
+        handler(ctx, session);
+        session->start();
+      });
   }
 
   bool HttpRouter::dispatch_stream(HttpContext& ctx, std::shared_ptr<HttpRequestStream> stream,
