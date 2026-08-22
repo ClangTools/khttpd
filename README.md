@@ -311,6 +311,7 @@ router.map_exception<khttpd::framework::TypedRequestValidationError>(
 Route registration also records handler-free documentation metadata. Legacy routes contribute their method, path, and path
 parameters; typed routes additionally contribute request and response schemas. DTOs declared with `BOOST_DESCRIBE_STRUCT`
 produce field-level schemas, while DTOs that only provide custom Boost.JSON converters use a conservative `object` schema.
+Path parameters registered as `:name` or `{name}` are both emitted in the OpenAPI-standard `{name}` form.
 
 Add field descriptions after `BOOST_DESCRIBE_STRUCT` with the OpenAPI field documentation macros. They only enrich
 `openapi.json` and `/docs`; Boost.JSON conversion and the DTO remain unchanged:

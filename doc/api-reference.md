@@ -222,8 +222,10 @@ KHTTPD_TYPED_ROUTE(post, "/users", create_user);
 | 语法 | 示例 | 匹配 |
 |------|------|------|
 | 静态路径 | `/api/users` | 精确匹配 |
-| 动态参数 | `/users/:id` | 匹配单段路径，如 `/users/123` |
+| 动态参数 | `/users/:id`、`/users/{id}` | 两种写法等价，匹配单段路径，如 `/users/123` |
 | 尾部通配 | `/files/:filepath` | 最后一个参数匹配剩余所有路径段 |
+
+生成 OpenAPI 文档时，两种动态参数写法都会统一输出为标准的 `{id}`，并生成对应的 `in: path` 参数定义。
 
 ### 路由优先级
 

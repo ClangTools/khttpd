@@ -26,7 +26,8 @@ namespace khttpd::framework
 
     DocumentedPath document_path(const std::string& route_path)
     {
-      static const std::regex parameter_pattern(":([a-zA-Z_][a-zA-Z0-9_]*)");
+      static const std::regex parameter_pattern(
+        R"((?::([a-zA-Z_][a-zA-Z0-9_]*)|\{([a-zA-Z_][a-zA-Z0-9_]*)\}))");
       DocumentedPath result;
       auto current = route_path.cbegin();
       const std::sregex_iterator end;
@@ -34,8 +35,9 @@ namespace khttpd::framework
            it != end; ++it)
       {
         result.path.append(current, it->prefix().second);
-        result.path += "{" + (*it)[1].str() + "}";
-        result.parameters.push_back((*it)[1].str());
+        const auto name = (*it)[1].matched ? (*it)[1].str() : (*it)[2].str();
+        result.path += "{" + name + "}";
+        result.parameters.push_back(name);
         current = it->suffix().first;
       }
       result.path.append(current, route_path.cend());

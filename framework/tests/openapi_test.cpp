@@ -141,6 +141,27 @@ TEST(OpenApiTest, IncludesLegacyMethodsAndPathParameters)
   EXPECT_EQ(parameter.at("x-khttpd-greedy"), true);
 }
 
+TEST(OpenApiTest, NormalizesColonAndBracePathParameters)
+{
+  fw::HttpRouter router;
+  router.get("/teams/{team_id}/users/:user_id", [](fw::HttpContext&) {});
+
+  const auto document = fw::generate_openapi(router);
+  const auto& operation = operation_at(document, "/teams/{team_id}/users/{user_id}", "get");
+  const auto& parameters = operation.at("parameters").as_array();
+
+  ASSERT_EQ(parameters.size(), 2U);
+  for (std::size_t index = 0; index < parameters.size(); ++index)
+  {
+    const auto& parameter = parameters.at(index).as_object();
+    EXPECT_EQ(parameter.at("in"), "path");
+    EXPECT_EQ(parameter.at("required"), true);
+    EXPECT_EQ(parameter.at("schema").as_object().at("type"), "string");
+  }
+  EXPECT_EQ(parameters.at(0).as_object().at("name"), "team_id");
+  EXPECT_EQ(parameters.at(1).as_object().at("name"), "user_id");
+}
+
 TEST(OpenApiTest, IncludesTypedDescribeSchemas)
 {
   fw::HttpRouter router;
