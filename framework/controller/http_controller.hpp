@@ -18,7 +18,8 @@ router.VERB(base_path() + PATH, bind_handler(&std::decay_t<decltype(*this)>::MET
 #endif
 #ifndef KHTTPD_TYPED_ROUTE
 #define KHTTPD_TYPED_ROUTE(VERB, PATH, METHOD_NAME) \
-router.VERB(base_path() + PATH, this->shared_from_this(), &std::decay_t<decltype(*this)>::METHOD_NAME)
+router.VERB(base_path() + PATH, this->shared_from_this(), \
+            &std::decay_t<decltype(*this)>::METHOD_NAME)
 #endif
 #ifndef KHTTPD_DOCUMENTED_TYPED_ROUTE
 #define KHTTPD_DOCUMENTED_TYPED_ROUTE(VERB, PATH, METHOD_NAME, ...) \

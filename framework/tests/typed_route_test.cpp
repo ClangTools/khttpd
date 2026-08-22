@@ -111,6 +111,16 @@ namespace
       KHTTPD_TYPED_ROUTE(post, "/member", create);
       KHTTPD_TYPED_ROUTE(post, "/const-member", lookup);
       KHTTPD_TYPED_ROUTE(post, "/with-context", with_context);
+      router.put("/parameterized/{id}", shared_from_this(), &TypedController::parameterized,
+                 fw::PathParam<int>{"id"}, fw::QueryParam<bool>{"notify", false});
+      router.get("/parameterized-get/{id}", shared_from_this(), &TypedController::parameterized,
+                 fw::PathParam<int>{"id"}, fw::QueryParam<bool>{"notify", false});
+      router.post("/parameterized-post/{id}", shared_from_this(), &TypedController::parameterized,
+                  fw::PathParam<int>{"id"}, fw::QueryParam<bool>{"notify", false});
+      router.del("/parameterized-delete/{id}", shared_from_this(), &TypedController::parameterized,
+                 fw::PathParam<int>{"id"}, fw::QueryParam<bool>{"notify", false});
+      router.options("/parameterized-options/{id}", shared_from_this(), &TypedController::parameterized,
+                     fw::PathParam<int>{"id"}, fw::QueryParam<bool>{"notify", false});
       return shared_from_this();
     }
 
@@ -128,6 +138,11 @@ namespace
     Reply with_context(const CreateRequest& request, fw::HttpContext& context)
     {
       return Reply{request.age, context.get_header("X-Display-Name").value_or(request.name)};
+    }
+
+    Reply parameterized(const int id, const bool notify, fw::HttpContext& context)
+    {
+      return Reply{id, notify ? context.path() : "quiet"};
     }
   };
 }
@@ -234,6 +249,162 @@ TEST(TypedRouteTest, ConvertsJsonAndAppliesHttpResult)
   EXPECT_EQ(response.result(), http::status::created);
   EXPECT_EQ(response[http::field::location], "/users/42");
   EXPECT_EQ(response.body(), R"({"id":42,"name":"Ada"})");
+}
+
+TEST(TypedRouteTest, BindsPathBodyAndQueryDescriptorsWithContext)
+{
+  fw::HttpRouter router;
+  router.put("/users/{id}",
+    [](const int id, const CreateRequest& request, const bool notify, fw::HttpContext& context)
+    {
+      const auto suffix = notify ? ":notify" : ":quiet";
+      return Reply{id, request.name + suffix + context.get_header("X-Trace").value_or("")};
+    },
+    fw::PathParam<int>{"id"},
+    fw::Body<CreateRequest>{},
+    fw::QueryParam<bool>{"notify"});
+
+  auto request = json_request("/users/42?notify=true", R"({"name":"Ada","age":20})");
+  request.method(http::verb::put);
+  request.set("X-Trace", ":trace");
+  http::response<http::string_body> response;
+  auto context = make_context(request, response);
+
+  EXPECT_TRUE(router.dispatch(context));
+  EXPECT_EQ(response.result(), http::status::ok);
+  EXPECT_EQ(response.body(), R"({"id":42,"name":"Ada:notify:trace"})");
+}
+
+TEST(TypedRouteTest, SupportsDefaultedAndOptionalQueryDescriptorsWithoutBody)
+{
+  fw::HttpRouter router;
+  router.get("/users",
+    [](const int page, const std::optional<std::string>& keyword)
+    {
+      return Reply{page, keyword.value_or("all")};
+    },
+    fw::QueryParam<int>{"page", 1},
+    fw::QueryParam<std::optional<std::string>>{"keyword"});
+
+  {
+    http::request<http::string_body> request(http::verb::get, "/users", 11);
+    http::response<http::string_body> response;
+    auto context = make_context(request, response);
+    EXPECT_TRUE(router.dispatch(context));
+    EXPECT_EQ(response.body(), R"({"id":1,"name":"all"})");
+  }
+
+  {
+    http::request<http::string_body> request(http::verb::get, "/users?page=3&keyword=Ada", 11);
+    http::response<http::string_body> response;
+    auto context = make_context(request, response);
+    EXPECT_TRUE(router.dispatch(context));
+    EXPECT_EQ(response.body(), R"({"id":3,"name":"Ada"})");
+  }
+}
+
+TEST(TypedRouteTest, StrictlyConvertsSupportedScalarDescriptors)
+{
+  fw::HttpRouter router;
+  router.get("/metrics/{scope}",
+    [](const std::string& scope, const double ratio, const bool enabled)
+    {
+      return Reply{static_cast<int>(ratio * 10), scope + (enabled ? ":on" : ":off")};
+    },
+    fw::PathParam<std::string>{"scope"},
+    fw::QueryParam<double>{"ratio"},
+    fw::QueryParam<bool>{"enabled"});
+
+  http::request<http::string_body> request(
+    http::verb::get, "/metrics/search?ratio=1.25&enabled=true", 11);
+  http::response<http::string_body> response;
+  auto context = make_context(request, response);
+
+  EXPECT_TRUE(router.dispatch(context));
+  EXPECT_EQ(response.body(), R"({"id":12,"name":"search:on"})");
+}
+
+TEST(TypedRouteTest, InvalidDescriptorValuesReturnStableBadRequestWithoutCallingHandler)
+{
+  struct Case
+  {
+    const char* target;
+    const char* message;
+  };
+  const Case cases[] = {
+    {"/users", "Missing query parameter 'page'"},
+    {"/users?page=3x", "Invalid query parameter 'page'"},
+  };
+
+  for (const auto& test_case : cases)
+  {
+    fw::HttpRouter router;
+    int calls = 0;
+    router.get("/users", [&calls](const int page)
+    {
+      ++calls;
+      return Reply{page, "called"};
+    }, fw::QueryParam<int>{"page"});
+
+    http::request<http::string_body> request(http::verb::get, test_case.target, 11);
+    http::response<http::string_body> response;
+    auto context = make_context(request, response);
+    EXPECT_TRUE(router.dispatch(context));
+    EXPECT_EQ(calls, 0);
+    EXPECT_EQ(response.result(), http::status::bad_request);
+    EXPECT_EQ(response[http::field::content_type], "application/json");
+    EXPECT_EQ(response.body(), std::string(R"({"code":"INVALID_REQUEST_PARAMETER","message":")") +
+                               test_case.message + R"("})");
+  }
+}
+
+TEST(TypedRouteTest, MapsInvalidDescriptorValuesThroughTheExceptionPipeline)
+{
+  fw::HttpRouter router;
+  int calls = 0;
+  router.map_exception<fw::TypedParameterValidationError>(
+    [](const fw::TypedParameterValidationError& error)
+    {
+      return fw::HttpResult<ErrorReply>(
+        http::status::unprocessable_entity,
+        ErrorReply{"AUTH_INVALID_PARAMETER", error.what()});
+    });
+  router.get("/users", [&calls](const int page)
+  {
+    ++calls;
+    return Reply{page, "called"};
+  }, fw::QueryParam<int>{"page"});
+
+  http::request<http::string_body> request(http::verb::get, "/users?page=invalid", 11);
+  http::response<http::string_body> response;
+  auto context = make_context(request, response);
+
+  EXPECT_TRUE(router.dispatch(context));
+  EXPECT_EQ(calls, 0);
+  EXPECT_EQ(response.result(), http::status::unprocessable_entity);
+  EXPECT_EQ(response.body(),
+            R"({"code":"AUTH_INVALID_PARAMETER","message":"Invalid query parameter 'page'"})");
+}
+
+TEST(TypedRouteTest, RejectsInvalidDescriptorDeclarationsAtRegistration)
+{
+  fw::HttpRouter router;
+  const auto one_argument = [](const int value)
+  {
+    return Reply{value, "one"};
+  };
+  const auto two_arguments = [](const int first, const int second)
+  {
+    return Reply{first + second, "two"};
+  };
+
+  EXPECT_THROW(router.get("/users/{id}", one_argument, fw::PathParam<int>{"other"}),
+               std::invalid_argument);
+  EXPECT_THROW(router.get("/users", one_argument, fw::QueryParam<int>{""}),
+               std::invalid_argument);
+  EXPECT_THROW(router.get("/users", two_arguments,
+                          fw::QueryParam<int>{"page"}, fw::QueryParam<int>{"page"}),
+               std::invalid_argument);
 }
 
 TEST(TypedRouteTest, InvalidBodiesReturnStableBadRequestWithoutCallingHandler)
@@ -401,6 +572,42 @@ TEST(TypedRouteTest, SupportsStdFunctionAndEveryBufferedVerb)
   }
 }
 
+TEST(TypedRouteTest, SupportsDescriptorsForEveryBufferedVerb)
+{
+  fw::HttpRouter router;
+  const auto handler = [](const int value)
+  {
+    return Reply{value, "bound"};
+  };
+  router.get("/descriptor-get", handler, fw::QueryParam<int>{"value"});
+  router.post("/descriptor-post", handler, fw::QueryParam<int>{"value"});
+  router.put("/descriptor-put", handler, fw::QueryParam<int>{"value"});
+  router.del("/descriptor-delete", handler, fw::QueryParam<int>{"value"});
+  router.options("/descriptor-options", handler, fw::QueryParam<int>{"value"});
+
+  const struct
+  {
+    http::verb verb;
+    const char* path;
+  } cases[] = {
+    {http::verb::get, "/descriptor-get?value=1"},
+    {http::verb::post, "/descriptor-post?value=2"},
+    {http::verb::put, "/descriptor-put?value=3"},
+    {http::verb::delete_, "/descriptor-delete?value=4"},
+    {http::verb::options, "/descriptor-options?value=5"},
+  };
+
+  for (std::size_t index = 0; index < std::size(cases); ++index)
+  {
+    http::request<http::string_body> request(cases[index].verb, cases[index].path, 11);
+    http::response<http::string_body> response;
+    auto context = make_context(request, response);
+    EXPECT_TRUE(router.dispatch(context));
+    EXPECT_EQ(response.body(), std::string(R"({"id":)") + std::to_string(index + 1) +
+                               R"(,"name":"bound"})");
+  }
+}
+
 TEST(TypedRouteTest, SupportsControllerMembersConstMembersAndContextInjection)
 {
   fw::HttpRouter router;
@@ -435,6 +642,33 @@ TEST(TypedRouteTest, SupportsControllerMembersConstMembersAndContextInjection)
     auto context = make_context(request, response);
     EXPECT_TRUE(router.dispatch(context));
     EXPECT_EQ(response.body(), R"({"id":12,"name":"Header Name"})");
+  }
+
+  {
+    http::request<http::string_body> request(http::verb::put, "/parameterized/17", 11);
+    http::response<http::string_body> response;
+    auto context = make_context(request, response);
+    EXPECT_TRUE(router.dispatch(context));
+    EXPECT_EQ(response.body(), R"({"id":17,"name":"quiet"})");
+  }
+
+  const struct
+  {
+    http::verb verb;
+    const char* path;
+  } descriptor_cases[] = {
+    {http::verb::get, "/parameterized-get/18"},
+    {http::verb::post, "/parameterized-post/18"},
+    {http::verb::delete_, "/parameterized-delete/18"},
+    {http::verb::options, "/parameterized-options/18"},
+  };
+  for (const auto& test_case : descriptor_cases)
+  {
+    http::request<http::string_body> request(test_case.verb, test_case.path, 11);
+    http::response<http::string_body> response;
+    auto context = make_context(request, response);
+    EXPECT_TRUE(router.dispatch(context));
+    EXPECT_EQ(response.body(), R"({"id":18,"name":"quiet"})");
   }
 }
 

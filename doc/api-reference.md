@@ -201,6 +201,59 @@ Controller 可使用：
 KHTTPD_TYPED_ROUTE(post, "/users", create_user);
 ```
 
+### C++17 路径、查询和请求体参数绑定
+
+注册路由时追加参数描述符，可将路径参数、查询参数和 JSON DTO 按顺序传给普通 handler 参数，不需要为字段名定义宏：
+
+```cpp
+HttpResult<UserResponse> update_user(
+  std::string id,
+  const UpdateUserRequest& body,
+  bool notify,
+  HttpContext& context);
+
+router.put(
+  "/users/{id}",
+  update_user,
+  {"编辑用户", "编辑用户资料，并可选择发送通知。"},
+  PathParam<std::string>{"id"},
+  Body<UpdateUserRequest>{},
+  QueryParam<bool>{"notify", false});
+```
+
+描述符顺序必须与 handler 参数顺序一致，最后可以额外声明一个 `HttpContext&`。Controller 成员函数使用相同描述符：
+
+```cpp
+router.put(base_path() + "/users/{id}", shared_from_this(),
+           &UserController::update_user,
+           PathParam<std::string>{"id"}, Body<UpdateUserRequest>{});
+```
+
+| 描述符 | 语义 |
+|------|------|
+| `PathParam<T>{"id"}` | 必填路径参数；名称必须存在于 `:id` 或 `{id}` 路由模板 |
+| `QueryParam<T>{"page"}` | 必填查询参数 |
+| `QueryParam<std::optional<T>>{"keyword"}` | 可选查询参数，缺失时为 `std::nullopt` |
+| `QueryParam<T>{"page", 1}` | 可选查询参数，缺失时使用默认值 |
+| `Body<T>{}` | 将 JSON 请求体转换为 DTO；每条路由最多一个 |
+
+路径和查询参数支持 `std::string`、整数、浮点数及布尔值；数值必须完整解析，布尔值只接受 `true` 或 `false`。
+缺失或格式错误会抛出 `TypedParameterValidationError`，未映射时返回 HTTP 400 和
+`INVALID_REQUEST_PARAMETER`。它与请求体异常一样经过统一异常映射管线：
+
+```cpp
+router.map_exception<khttpd::framework::TypedParameterValidationError>(
+  [](const auto& error) {
+    return khttpd::framework::HttpResult<ErrorResponse>(
+      boost::beast::http::status::bad_request,
+      {"INVALID_PARAMETER", error.what()});
+  });
+```
+
+描述符还会生成 OpenAPI 参数和请求体 schema：路径参数始终为 required；可选或有默认值的 query 参数为
+optional，默认值写入 schema。`RouteDocumentation` 可放在 handler 后、描述符前，同时保留 summary、description
+和请求头说明。
+
 原有 `KHTTPD_ROUTE`、`void(HttpContext&)` 和所有路由分发行为保持不变。强类型路由仍执行相同的前置/后置拦截器，
 不能替代鉴权拦截器。
 
@@ -222,8 +275,10 @@ KHTTPD_TYPED_ROUTE(post, "/users", create_user);
 | 语法 | 示例 | 匹配 |
 |------|------|------|
 | 静态路径 | `/api/users` | 精确匹配 |
-| 动态参数 | `/users/:id` | 匹配单段路径，如 `/users/123` |
+| 动态参数 | `/users/:id`、`/users/{id}` | 两种写法等价，匹配单段路径，如 `/users/123` |
 | 尾部通配 | `/files/:filepath` | 最后一个参数匹配剩余所有路径段 |
+
+生成 OpenAPI 文档时，两种动态参数写法都会统一输出为标准的 `{id}`，并生成对应的 `in: path` 参数定义。
 
 ### 路由优先级
 

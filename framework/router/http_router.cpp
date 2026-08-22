@@ -154,11 +154,12 @@ namespace khttpd::framework
                              std::optional<boost::json::value> request_schema,
                              std::optional<boost::json::value> response_schema,
                              const bool documented,
-                             RouteDocumentation documentation)
+                             RouteDocumentation documentation,
+                             std::vector<RouteParameterDocumentation> parameters)
   {
     if (documented)
       record_route_descriptor(path_pattern, method, std::move(request_schema), std::move(response_schema),
-                              std::move(documentation));
+                              std::move(documentation), std::move(parameters));
     else
       route_descriptors_.erase(std::remove_if(route_descriptors_.begin(), route_descriptors_.end(),
         [&](const RouteDescriptor& descriptor)
@@ -197,16 +198,37 @@ namespace khttpd::framework
                                    detail::TypedRouteHandler handler,
                                    RouteDocumentation documentation)
   {
+    const auto parsed = parse_path_pattern(path_pattern);
+    const auto& path_parameter_names = std::get<1>(parsed);
+    for (std::size_t index = 0; index < handler.parameters.size(); ++index)
+    {
+      const auto& parameter = handler.parameters[index];
+      if (parameter.name.empty())
+        throw std::invalid_argument("Typed route parameter names cannot be empty");
+      if (parameter.location == RouteParameterLocation::path &&
+          std::find(path_parameter_names.begin(), path_parameter_names.end(), parameter.name) ==
+            path_parameter_names.end())
+        throw std::invalid_argument("Path parameter '" + parameter.name +
+                                    "' is not present in route " + path_pattern);
+      for (std::size_t previous = 0; previous < index; ++previous)
+      {
+        if (handler.parameters[previous].location == parameter.location &&
+            handler.parameters[previous].name == parameter.name)
+          throw std::invalid_argument("Duplicate typed route parameter '" + parameter.name + "'");
+      }
+    }
+
     add_route(path_pattern, method, std::move(handler.handler),
               std::move(handler.request_schema), std::move(handler.response_schema), true,
-              std::move(documentation));
+              std::move(documentation), std::move(handler.parameters));
   }
 
   void HttpRouter::record_route_descriptor(const std::string& path,
                                            const boost::beast::http::verb method,
                                            std::optional<boost::json::value> request_schema,
                                            std::optional<boost::json::value> response_schema,
-                                           RouteDocumentation documentation)
+                                           RouteDocumentation documentation,
+                                           std::vector<RouteParameterDocumentation> parameters)
   {
     if (documentation.request_schema) request_schema = documentation.request_schema;
     if (documentation.response_schema) response_schema = documentation.response_schema;
@@ -216,6 +238,7 @@ namespace khttpd::framework
       {
         descriptor.request_schema = std::move(request_schema);
         descriptor.response_schema = std::move(response_schema);
+        descriptor.parameters = std::move(parameters);
         if (!documentation.summary.empty() || !documentation.description.empty() ||
             !documentation.headers.empty() || documentation.request_schema || documentation.response_schema)
           descriptor.documentation = std::move(documentation);
@@ -223,7 +246,8 @@ namespace khttpd::framework
       }
     }
     route_descriptors_.push_back(
-      {path, method, std::move(request_schema), std::move(response_schema), std::move(documentation)});
+      {path, method, std::move(request_schema), std::move(response_schema), std::move(documentation),
+       std::move(parameters)});
   }
 
   std::vector<RouteDescriptor> HttpRouter::route_descriptors() const
@@ -641,6 +665,11 @@ namespace khttpd::framework
     try
     {
       std::rethrow_exception(eptr);
+    }
+    catch (const TypedParameterValidationError& error)
+    {
+      detail::write_invalid_request_parameter(ctx, error.what());
+      return;
     }
     catch (const TypedRequestValidationError&)
     {

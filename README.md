@@ -293,6 +293,31 @@ Typed request bodies require `application/json` or an `application/*+json` media
 response without invoking the handler. Typed routes register as ordinary buffered routes, so interceptors and authorization
 checks run before them exactly as they do for legacy routes.
 
+In C++17, route parameter descriptors bind path, query, and JSON body values directly to ordinary handler arguments. The
+descriptor order must match the handler argument order; an optional `HttpContext&` may appear last:
+
+```cpp
+HttpResult<UserResponse> update_user(
+    std::string id,
+    const UpdateUserRequest& body,
+    bool notify,
+    HttpContext& context);
+
+router.put(
+    "/users/{id}",
+    update_user,
+    {"Update user", "Updates a user and optionally sends a notification."},
+    PathParam<std::string>{"id"},
+    Body<UpdateUserRequest>{},
+    QueryParam<bool>{"notify", false});
+```
+
+`PathParam<T>` and `QueryParam<T>` support strings, integral and floating-point values, and strict `true`/`false` booleans.
+`QueryParam<T>{"name"}` is required, `QueryParam<std::optional<T>>{"name"}` is optional, and
+`QueryParam<T>{"name", default_value}` supplies a default. A path descriptor name must exist in the registered `:name` or
+`{name}` template. Missing or invalid values throw `TypedParameterValidationError`; the default response is HTTP 400 with
+code `INVALID_REQUEST_PARAMETER`, and applications can map the exception to their own envelope.
+
 Invalid media types, malformed JSON, and DTO conversion failures throw `TypedRequestValidationError` through the router's
 exception pipeline. Without a mapper they retain the default `400 INVALID_REQUEST_BODY` response; applications that use a
 shared error envelope can map them once for every typed route:
@@ -304,6 +329,12 @@ router.map_exception<khttpd::framework::TypedRequestValidationError>(
             boost::beast::http::status::bad_request,
             {"INVALID_REQUEST", error.what()});
     });
+router.map_exception<khttpd::framework::TypedParameterValidationError>(
+    [](const auto& error) {
+        return khttpd::framework::HttpResult<ErrorResponse>(
+            boost::beast::http::status::bad_request,
+            {"INVALID_PARAMETER", error.what()});
+    });
 ```
 
 ### OpenAPI 3.1 documentation
@@ -311,6 +342,7 @@ router.map_exception<khttpd::framework::TypedRequestValidationError>(
 Route registration also records handler-free documentation metadata. Legacy routes contribute their method, path, and path
 parameters; typed routes additionally contribute request and response schemas. DTOs declared with `BOOST_DESCRIBE_STRUCT`
 produce field-level schemas, while DTOs that only provide custom Boost.JSON converters use a conservative `object` schema.
+Path parameters registered as `:name` or `{name}` are both emitted in the OpenAPI-standard `{name}` form.
 
 Add field descriptions after `BOOST_DESCRIBE_STRUCT` with the OpenAPI field documentation macros. They only enrich
 `openapi.json` and `/docs`; Boost.JSON conversion and the DTO remain unchanged:
@@ -376,7 +408,8 @@ schema for the target consumer. Unreflected C++ object types are emitted conserv
 `{"type":"object","properties":{}}`.
 
 The example includes documented legacy lambda routes (`/`, `/hello`, `/api/json`), documented controller routes
-(`/stream/:size` and `/hello/hello`), and documented typed `POST /typed/greetings`, along with `HttpResult<T>`
+(`/stream/:size` and `/hello/hello`), and documented typed `POST /typed/greetings` and
+`PUT /typed/greetings/{id}?excited=true`, along with `HttpResult<T>`
 headers/status and a serialized validation exception. Run it normally on port 8080, or export the exact same registered
 routes and exit without constructing a listening server:
 

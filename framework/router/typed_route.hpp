@@ -3,10 +3,12 @@
 
 #include "router/http_result.hpp"
 #include "router/openapi_schema.hpp"
+#include "router/route_parameter.hpp"
 
 #include <boost/json.hpp>
 
 #include <algorithm>
+#include <charconv>
 #include <cstddef>
 #include <cctype>
 #include <exception>
@@ -28,6 +30,12 @@ namespace khttpd::framework
   public:
     using std::runtime_error::runtime_error;
   };
+
+  class TypedParameterValidationError final : public std::runtime_error
+  {
+  public:
+    using std::runtime_error::runtime_error;
+  };
 }
 
 namespace khttpd::framework::detail
@@ -35,8 +43,9 @@ namespace khttpd::framework::detail
   struct TypedRouteHandler
   {
     std::function<void(HttpContext&)> handler;
-    boost::json::value request_schema;
+    std::optional<boost::json::value> request_schema;
     std::optional<boost::json::value> response_schema;
+    std::vector<RouteParameterDocumentation> parameters;
   };
 
   template <class T>
@@ -91,6 +100,15 @@ namespace khttpd::framework::detail
     context.set_body_json(error);
   }
 
+  inline void write_invalid_request_parameter(HttpContext& context, const std::string& message)
+  {
+    context.set_status(boost::beast::http::status::bad_request);
+    boost::json::object error;
+    error.emplace("code", "INVALID_REQUEST_PARAMETER");
+    error.emplace("message", message);
+    context.set_body_json(error);
+  }
+
   inline bool is_json_media_type(std::string content_type)
   {
     if (const auto semicolon = content_type.find(';'); semicolon != std::string::npos)
@@ -115,6 +133,216 @@ namespace khttpd::framework::detail
       (media_type.size() > prefix.size() + suffix.size() &&
        media_type.compare(0, prefix.size(), prefix) == 0 &&
        media_type.compare(media_type.size() - suffix.size(), suffix.size(), suffix) == 0);
+  }
+
+  template <class T>
+  T parse_parameter_value(const std::string& value, const char* location, const std::string& name)
+  {
+    using Value = remove_cvref_t<T>;
+    if constexpr (is_optional_v<Value>)
+    {
+      using Item = typename is_optional<Value>::value_type;
+      return Value{parse_parameter_value<Item>(value, location, name)};
+    }
+    else if constexpr (std::is_same_v<Value, std::string>)
+    {
+      return value;
+    }
+    else if constexpr (std::is_same_v<Value, bool>)
+    {
+      if (value == "true") return true;
+      if (value == "false") return false;
+    }
+    else if constexpr (std::is_integral_v<Value>)
+    {
+      Value converted{};
+      const auto result = std::from_chars(value.data(), value.data() + value.size(), converted);
+      if (result.ec == std::errc{} && result.ptr == value.data() + value.size()) return converted;
+    }
+    else if constexpr (std::is_floating_point_v<Value>)
+    {
+      Value converted{};
+      const auto result = std::from_chars(value.data(), value.data() + value.size(), converted);
+      if (result.ec == std::errc{} && result.ptr == value.data() + value.size()) return converted;
+    }
+    else
+    {
+      static_assert(std::is_same_v<Value, void>,
+                    "route parameters support string, bool, integral, and floating-point values");
+    }
+
+    throw TypedParameterValidationError(
+      std::string("Invalid ") + location + " parameter '" + name + "'");
+  }
+
+  template <class T>
+  T read_route_parameter(const PathParam<T>& descriptor, HttpContext& context)
+  {
+    const auto value = context.get_path_param(descriptor.name);
+    if (!value)
+      throw TypedParameterValidationError("Missing path parameter '" + descriptor.name + "'");
+    return parse_parameter_value<T>(*value, "path", descriptor.name);
+  }
+
+  template <class T>
+  T read_route_parameter(const QueryParam<T>& descriptor, HttpContext& context)
+  {
+    const auto value = context.get_query_param(descriptor.name);
+    if (value) return parse_parameter_value<T>(*value, "query", descriptor.name);
+    if (descriptor.default_value) return *descriptor.default_value;
+    if constexpr (is_optional_v<T>) return std::nullopt;
+    throw TypedParameterValidationError("Missing query parameter '" + descriptor.name + "'");
+  }
+
+  template <class T>
+  T read_route_parameter(const Body<T>&, HttpContext& context)
+  {
+    const auto content_type = context.get_header(boost::beast::http::field::content_type);
+    if (!content_type || !is_json_media_type(*content_type))
+      throw TypedRequestValidationError("Request body must be valid JSON matching the expected schema");
+
+    try
+    {
+      return boost::json::value_to<T>(boost::json::parse(context.body()));
+    }
+    catch (const std::bad_alloc&)
+    {
+      throw;
+    }
+    catch (const std::exception&)
+    {
+      throw TypedRequestValidationError("Request body must be valid JSON matching the expected schema");
+    }
+  }
+
+  template <class Descriptor>
+  void set_request_schema(std::optional<boost::json::value>& schema)
+  {
+    using Value = std::decay_t<Descriptor>;
+    if constexpr (std::is_same_v<Value, Body<typename Value::value_type>>)
+      schema.emplace(openapi_schema<typename Value::value_type>());
+  }
+
+  template <class T>
+  void append_parameter_documentation(std::vector<RouteParameterDocumentation>& parameters,
+                                      const PathParam<T>& descriptor)
+  {
+    parameters.push_back(
+      {descriptor.name, RouteParameterLocation::path, true, openapi_schema<T>()});
+  }
+
+  template <class T>
+  void append_parameter_documentation(std::vector<RouteParameterDocumentation>& parameters,
+                                      const QueryParam<T>& descriptor)
+  {
+    auto schema = openapi_schema<T>();
+    if (descriptor.default_value)
+    {
+      if constexpr (is_optional_v<T>)
+      {
+        if (*descriptor.default_value)
+          schema.as_object().emplace("default", boost::json::value_from(**descriptor.default_value));
+      }
+      else
+      {
+        schema.as_object().emplace("default", boost::json::value_from(*descriptor.default_value));
+      }
+    }
+    parameters.push_back({descriptor.name, RouteParameterLocation::query,
+                          !descriptor.default_value && !is_optional_v<T>, std::move(schema)});
+  }
+
+  template <class T>
+  void append_parameter_documentation(std::vector<RouteParameterDocumentation>&, const Body<T>&)
+  {
+  }
+
+  template <class Response, class Handler, class... Descriptors>
+  TypedRouteHandler make_parameterized_typed_handler_with_response(
+    Handler&& input_handler, Descriptors&&... input_descriptors)
+  {
+    static_assert((is_route_parameter_descriptor_v<Descriptors> && ...),
+                  "all typed route bindings must be route parameter descriptors");
+    static_assert((0U + ... + (is_body_descriptor_v<Descriptors> ? 1U : 0U)) <= 1U,
+                  "a typed route can register at most one Body descriptor");
+    using StoredHandler = std::decay_t<Handler>;
+    static_assert(!std::is_void_v<Response>,
+                  "typed handlers must return a body or HttpResult<void>");
+    static_assert(!std::is_reference_v<Response>,
+                  "typed handlers must return responses by value");
+
+    std::vector<RouteParameterDocumentation> parameters;
+    (append_parameter_documentation(parameters, input_descriptors), ...);
+    auto descriptors = std::make_tuple(std::forward<Descriptors>(input_descriptors)...);
+    auto adapted = [handler = StoredHandler(std::forward<Handler>(input_handler)),
+                    descriptors = std::move(descriptors)](HttpContext& context) mutable
+    {
+      auto values = std::apply([&context](const auto&... descriptor)
+      {
+        return std::make_tuple(read_route_parameter(descriptor, context)...);
+      }, descriptors);
+
+      std::apply([&](auto&... value)
+      {
+        if constexpr (std::is_invocable_v<StoredHandler&, decltype(value)..., HttpContext&>)
+        {
+          auto response = std::invoke(handler, value..., context);
+          apply_typed_response(context, std::move(response));
+        }
+        else
+        {
+          static_assert(std::is_invocable_v<StoredHandler&, decltype(value)...>,
+                        "typed handler arguments must match the registered route descriptors");
+          auto response = std::invoke(handler, value...);
+          apply_typed_response(context, std::move(response));
+        }
+      }, values);
+    };
+
+    std::optional<boost::json::value> request_schema;
+    (set_request_schema<std::decay_t<Descriptors>>(request_schema), ...);
+    using ResponseBody = typename typed_response_body<Response>::type;
+    std::optional<boost::json::value> response_schema;
+    if constexpr (!std::is_void_v<ResponseBody>) response_schema.emplace(openapi_schema<ResponseBody>());
+    return {std::move(adapted), std::move(request_schema), std::move(response_schema),
+            std::move(parameters)};
+  }
+
+  template <class Handler, class... Descriptors>
+  TypedRouteHandler make_parameterized_typed_handler(Handler&& input_handler,
+                                                      Descriptors&&... input_descriptors)
+  {
+    using Response = typename callable_traits<std::decay_t<Handler>>::return_type;
+    return make_parameterized_typed_handler_with_response<Response>(
+      std::forward<Handler>(input_handler), std::forward<Descriptors>(input_descriptors)...);
+  }
+
+  template <class Controller, class Response, class... Arguments, class... Descriptors>
+  TypedRouteHandler make_parameterized_member_handler(
+    std::shared_ptr<Controller> controller,
+    Response (Controller::*method)(Arguments...),
+    Descriptors&&... descriptors)
+  {
+    auto bound = [controller = std::move(controller), method](auto&... value) -> Response
+    {
+      return std::invoke(method, *controller, value...);
+    };
+    return make_parameterized_typed_handler_with_response<Response>(
+      std::move(bound), std::forward<Descriptors>(descriptors)...);
+  }
+
+  template <class Controller, class Response, class... Arguments, class... Descriptors>
+  TypedRouteHandler make_parameterized_member_handler(
+    std::shared_ptr<Controller> controller,
+    Response (Controller::*method)(Arguments...) const,
+    Descriptors&&... descriptors)
+  {
+    auto bound = [controller = std::move(controller), method](auto&... value) -> Response
+    {
+      return std::invoke(method, *controller, value...);
+    };
+    return make_parameterized_typed_handler_with_response<Response>(
+      std::move(bound), std::forward<Descriptors>(descriptors)...);
   }
 
   template <class Handler>
@@ -184,7 +412,7 @@ namespace khttpd::framework::detail
     using ResponseBody = typename typed_response_body<Response>::type;
     std::optional<boost::json::value> response_schema;
     if constexpr (!std::is_void_v<ResponseBody>) response_schema.emplace(openapi_schema<ResponseBody>());
-    return {std::move(adapted), openapi_schema<Request>(), std::move(response_schema)};
+    return {std::move(adapted), openapi_schema<Request>(), std::move(response_schema), {}};
   }
 
   template <class Controller, class Response, class Request>

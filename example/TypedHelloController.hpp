@@ -58,6 +58,12 @@ public:
     KHTTPD_DOCUMENTED_TYPED_ROUTE(post, "/greetings", create_greeting,
                                   {"Create a greeting",
                                    "Validates a name and returns a created greeting with its Location header."});
+    router.put(base_path() + "/greetings/{id}", shared_from_this(),
+               &TypedHelloController::update_greeting,
+               {"Update a greeting", "Binds a path value, JSON DTO, query value, and HttpContext."},
+               khttpd::framework::PathParam<int>{"id"},
+               khttpd::framework::Body<CreateGreetingRequest>{},
+               khttpd::framework::QueryParam<bool>{"excited", false});
     return shared_from_this();
   }
 
@@ -76,6 +82,14 @@ private:
       {"Hello, " + request.name + "!"});
     return result.header("Location", "/typed/greetings/latest")
       .header("X-Example-Handler", "typed");
+  }
+
+  GreetingResponse update_greeting(int id, const CreateGreetingRequest& request, bool excited,
+                                   khttpd::framework::HttpContext& context) const
+  {
+    const auto request_id = context.get_header("X-Request-Id").value_or("none");
+    return {"Greeting " + std::to_string(id) + ": Hello, " + request.name +
+            (excited ? "!" : ".") + " request=" + request_id};
   }
 };
 

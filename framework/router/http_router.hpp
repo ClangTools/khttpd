@@ -57,6 +57,7 @@ namespace khttpd::framework
     std::optional<boost::json::value> request_schema;
     std::optional<boost::json::value> response_schema;
     RouteDocumentation documentation;
+    std::vector<RouteParameterDocumentation> parameters;
   };
 
   // 路由条目结构
@@ -109,11 +110,59 @@ namespace khttpd::framework
                       detail::make_typed_handler(std::forward<Handler>(handler)));
     }
 
+    template <class Handler, class FirstDescriptor, class... Descriptors,
+              std::enable_if_t<detail::is_route_parameter_descriptor_v<FirstDescriptor> &&
+                               (detail::is_route_parameter_descriptor_v<Descriptors> && ...), int> = 0>
+    void get(const std::string& path, Handler&& handler, FirstDescriptor&& first,
+             Descriptors&&... descriptors)
+    {
+      add_typed_route(path, boost::beast::http::verb::get,
+        detail::make_parameterized_typed_handler(
+          std::forward<Handler>(handler), std::forward<FirstDescriptor>(first),
+          std::forward<Descriptors>(descriptors)...));
+    }
+
+    template <class Handler, class FirstDescriptor, class... Descriptors,
+              std::enable_if_t<detail::is_route_parameter_descriptor_v<FirstDescriptor> &&
+                               (detail::is_route_parameter_descriptor_v<Descriptors> && ...), int> = 0>
+    void get(const std::string& path, Handler&& handler, RouteDocumentation documentation,
+             FirstDescriptor&& first, Descriptors&&... descriptors)
+    {
+      add_typed_route(path, boost::beast::http::verb::get,
+        detail::make_parameterized_typed_handler(
+          std::forward<Handler>(handler), std::forward<FirstDescriptor>(first),
+          std::forward<Descriptors>(descriptors)...), std::move(documentation));
+    }
+
     template <class Handler, std::enable_if_t<!std::is_convertible_v<Handler, HttpHandler>, int> = 0>
     void post(const std::string& path, Handler&& handler)
     {
       add_typed_route(path, boost::beast::http::verb::post,
                       detail::make_typed_handler(std::forward<Handler>(handler)));
+    }
+
+    template <class Handler, class FirstDescriptor, class... Descriptors,
+              std::enable_if_t<detail::is_route_parameter_descriptor_v<FirstDescriptor> &&
+                               (detail::is_route_parameter_descriptor_v<Descriptors> && ...), int> = 0>
+    void post(const std::string& path, Handler&& handler, FirstDescriptor&& first,
+              Descriptors&&... descriptors)
+    {
+      add_typed_route(path, boost::beast::http::verb::post,
+        detail::make_parameterized_typed_handler(
+          std::forward<Handler>(handler), std::forward<FirstDescriptor>(first),
+          std::forward<Descriptors>(descriptors)...));
+    }
+
+    template <class Handler, class FirstDescriptor, class... Descriptors,
+              std::enable_if_t<detail::is_route_parameter_descriptor_v<FirstDescriptor> &&
+                               (detail::is_route_parameter_descriptor_v<Descriptors> && ...), int> = 0>
+    void post(const std::string& path, Handler&& handler, RouteDocumentation documentation,
+              FirstDescriptor&& first, Descriptors&&... descriptors)
+    {
+      add_typed_route(path, boost::beast::http::verb::post,
+        detail::make_parameterized_typed_handler(
+          std::forward<Handler>(handler), std::forward<FirstDescriptor>(first),
+          std::forward<Descriptors>(descriptors)...), std::move(documentation));
     }
 
     template <class Handler, std::enable_if_t<!std::is_convertible_v<Handler, HttpHandler>, int> = 0>
@@ -123,6 +172,30 @@ namespace khttpd::framework
                       detail::make_typed_handler(std::forward<Handler>(handler)));
     }
 
+    template <class Handler, class FirstDescriptor, class... Descriptors,
+              std::enable_if_t<detail::is_route_parameter_descriptor_v<FirstDescriptor> &&
+                               (detail::is_route_parameter_descriptor_v<Descriptors> && ...), int> = 0>
+    void put(const std::string& path, Handler&& handler, FirstDescriptor&& first,
+             Descriptors&&... descriptors)
+    {
+      add_typed_route(path, boost::beast::http::verb::put,
+        detail::make_parameterized_typed_handler(
+          std::forward<Handler>(handler), std::forward<FirstDescriptor>(first),
+          std::forward<Descriptors>(descriptors)...));
+    }
+
+    template <class Handler, class FirstDescriptor, class... Descriptors,
+              std::enable_if_t<detail::is_route_parameter_descriptor_v<FirstDescriptor> &&
+                               (detail::is_route_parameter_descriptor_v<Descriptors> && ...), int> = 0>
+    void put(const std::string& path, Handler&& handler, RouteDocumentation documentation,
+             FirstDescriptor&& first, Descriptors&&... descriptors)
+    {
+      add_typed_route(path, boost::beast::http::verb::put,
+        detail::make_parameterized_typed_handler(
+          std::forward<Handler>(handler), std::forward<FirstDescriptor>(first),
+          std::forward<Descriptors>(descriptors)...), std::move(documentation));
+    }
+
     template <class Handler, std::enable_if_t<!std::is_convertible_v<Handler, HttpHandler>, int> = 0>
     void del(const std::string& path, Handler&& handler)
     {
@@ -130,11 +203,59 @@ namespace khttpd::framework
                       detail::make_typed_handler(std::forward<Handler>(handler)));
     }
 
+    template <class Handler, class FirstDescriptor, class... Descriptors,
+              std::enable_if_t<detail::is_route_parameter_descriptor_v<FirstDescriptor> &&
+                               (detail::is_route_parameter_descriptor_v<Descriptors> && ...), int> = 0>
+    void del(const std::string& path, Handler&& handler, FirstDescriptor&& first,
+             Descriptors&&... descriptors)
+    {
+      add_typed_route(path, boost::beast::http::verb::delete_,
+        detail::make_parameterized_typed_handler(
+          std::forward<Handler>(handler), std::forward<FirstDescriptor>(first),
+          std::forward<Descriptors>(descriptors)...));
+    }
+
+    template <class Handler, class FirstDescriptor, class... Descriptors,
+              std::enable_if_t<detail::is_route_parameter_descriptor_v<FirstDescriptor> &&
+                               (detail::is_route_parameter_descriptor_v<Descriptors> && ...), int> = 0>
+    void del(const std::string& path, Handler&& handler, RouteDocumentation documentation,
+             FirstDescriptor&& first, Descriptors&&... descriptors)
+    {
+      add_typed_route(path, boost::beast::http::verb::delete_,
+        detail::make_parameterized_typed_handler(
+          std::forward<Handler>(handler), std::forward<FirstDescriptor>(first),
+          std::forward<Descriptors>(descriptors)...), std::move(documentation));
+    }
+
     template <class Handler, std::enable_if_t<!std::is_convertible_v<Handler, HttpHandler>, int> = 0>
     void options(const std::string& path, Handler&& handler)
     {
       add_typed_route(path, boost::beast::http::verb::options,
                       detail::make_typed_handler(std::forward<Handler>(handler)));
+    }
+
+    template <class Handler, class FirstDescriptor, class... Descriptors,
+              std::enable_if_t<detail::is_route_parameter_descriptor_v<FirstDescriptor> &&
+                               (detail::is_route_parameter_descriptor_v<Descriptors> && ...), int> = 0>
+    void options(const std::string& path, Handler&& handler, FirstDescriptor&& first,
+                 Descriptors&&... descriptors)
+    {
+      add_typed_route(path, boost::beast::http::verb::options,
+        detail::make_parameterized_typed_handler(
+          std::forward<Handler>(handler), std::forward<FirstDescriptor>(first),
+          std::forward<Descriptors>(descriptors)...));
+    }
+
+    template <class Handler, class FirstDescriptor, class... Descriptors,
+              std::enable_if_t<detail::is_route_parameter_descriptor_v<FirstDescriptor> &&
+                               (detail::is_route_parameter_descriptor_v<Descriptors> && ...), int> = 0>
+    void options(const std::string& path, Handler&& handler, RouteDocumentation documentation,
+                 FirstDescriptor&& first, Descriptors&&... descriptors)
+    {
+      add_typed_route(path, boost::beast::http::verb::options,
+        detail::make_parameterized_typed_handler(
+          std::forward<Handler>(handler), std::forward<FirstDescriptor>(first),
+          std::forward<Descriptors>(descriptors)...), std::move(documentation));
     }
 
     template <class Handler, std::enable_if_t<!std::is_convertible_v<Handler, HttpHandler>, int> = 0>
@@ -179,11 +300,59 @@ namespace khttpd::framework
                       detail::make_typed_member_handler(std::move(controller), method));
     }
 
+    template <class Controller, class Method, class FirstDescriptor, class... Descriptors,
+              std::enable_if_t<detail::is_route_parameter_descriptor_v<FirstDescriptor> &&
+                               (detail::is_route_parameter_descriptor_v<Descriptors> && ...), int> = 0>
+    void get(const std::string& path, std::shared_ptr<Controller> controller, Method method,
+             FirstDescriptor&& first, Descriptors&&... descriptors)
+    {
+      add_typed_route(path, boost::beast::http::verb::get,
+        detail::make_parameterized_member_handler(
+          std::move(controller), method, std::forward<FirstDescriptor>(first),
+          std::forward<Descriptors>(descriptors)...));
+    }
+
+    template <class Controller, class Method, class FirstDescriptor, class... Descriptors,
+              std::enable_if_t<detail::is_route_parameter_descriptor_v<FirstDescriptor> &&
+                               (detail::is_route_parameter_descriptor_v<Descriptors> && ...), int> = 0>
+    void get(const std::string& path, std::shared_ptr<Controller> controller, Method method,
+             RouteDocumentation documentation, FirstDescriptor&& first, Descriptors&&... descriptors)
+    {
+      add_typed_route(path, boost::beast::http::verb::get,
+        detail::make_parameterized_member_handler(
+          std::move(controller), method, std::forward<FirstDescriptor>(first),
+          std::forward<Descriptors>(descriptors)...), std::move(documentation));
+    }
+
     template <class Controller, class Method>
     void post(const std::string& path, std::shared_ptr<Controller> controller, Method method)
     {
       add_typed_route(path, boost::beast::http::verb::post,
                       detail::make_typed_member_handler(std::move(controller), method));
+    }
+
+    template <class Controller, class Method, class FirstDescriptor, class... Descriptors,
+              std::enable_if_t<detail::is_route_parameter_descriptor_v<FirstDescriptor> &&
+                               (detail::is_route_parameter_descriptor_v<Descriptors> && ...), int> = 0>
+    void post(const std::string& path, std::shared_ptr<Controller> controller, Method method,
+              FirstDescriptor&& first, Descriptors&&... descriptors)
+    {
+      add_typed_route(path, boost::beast::http::verb::post,
+        detail::make_parameterized_member_handler(
+          std::move(controller), method, std::forward<FirstDescriptor>(first),
+          std::forward<Descriptors>(descriptors)...));
+    }
+
+    template <class Controller, class Method, class FirstDescriptor, class... Descriptors,
+              std::enable_if_t<detail::is_route_parameter_descriptor_v<FirstDescriptor> &&
+                               (detail::is_route_parameter_descriptor_v<Descriptors> && ...), int> = 0>
+    void post(const std::string& path, std::shared_ptr<Controller> controller, Method method,
+              RouteDocumentation documentation, FirstDescriptor&& first, Descriptors&&... descriptors)
+    {
+      add_typed_route(path, boost::beast::http::verb::post,
+        detail::make_parameterized_member_handler(
+          std::move(controller), method, std::forward<FirstDescriptor>(first),
+          std::forward<Descriptors>(descriptors)...), std::move(documentation));
     }
 
     template <class Controller, class Method>
@@ -193,6 +362,30 @@ namespace khttpd::framework
                       detail::make_typed_member_handler(std::move(controller), method));
     }
 
+    template <class Controller, class Method, class FirstDescriptor, class... Descriptors,
+              std::enable_if_t<detail::is_route_parameter_descriptor_v<FirstDescriptor> &&
+                               (detail::is_route_parameter_descriptor_v<Descriptors> && ...), int> = 0>
+    void put(const std::string& path, std::shared_ptr<Controller> controller, Method method,
+             FirstDescriptor&& first, Descriptors&&... descriptors)
+    {
+      add_typed_route(path, boost::beast::http::verb::put,
+        detail::make_parameterized_member_handler(
+          std::move(controller), method, std::forward<FirstDescriptor>(first),
+          std::forward<Descriptors>(descriptors)...));
+    }
+
+    template <class Controller, class Method, class FirstDescriptor, class... Descriptors,
+              std::enable_if_t<detail::is_route_parameter_descriptor_v<FirstDescriptor> &&
+                               (detail::is_route_parameter_descriptor_v<Descriptors> && ...), int> = 0>
+    void put(const std::string& path, std::shared_ptr<Controller> controller, Method method,
+             RouteDocumentation documentation, FirstDescriptor&& first, Descriptors&&... descriptors)
+    {
+      add_typed_route(path, boost::beast::http::verb::put,
+        detail::make_parameterized_member_handler(
+          std::move(controller), method, std::forward<FirstDescriptor>(first),
+          std::forward<Descriptors>(descriptors)...), std::move(documentation));
+    }
+
     template <class Controller, class Method>
     void del(const std::string& path, std::shared_ptr<Controller> controller, Method method)
     {
@@ -200,11 +393,60 @@ namespace khttpd::framework
                       detail::make_typed_member_handler(std::move(controller), method));
     }
 
+    template <class Controller, class Method, class FirstDescriptor, class... Descriptors,
+              std::enable_if_t<detail::is_route_parameter_descriptor_v<FirstDescriptor> &&
+                               (detail::is_route_parameter_descriptor_v<Descriptors> && ...), int> = 0>
+    void del(const std::string& path, std::shared_ptr<Controller> controller, Method method,
+             FirstDescriptor&& first, Descriptors&&... descriptors)
+    {
+      add_typed_route(path, boost::beast::http::verb::delete_,
+        detail::make_parameterized_member_handler(
+          std::move(controller), method, std::forward<FirstDescriptor>(first),
+          std::forward<Descriptors>(descriptors)...));
+    }
+
+    template <class Controller, class Method, class FirstDescriptor, class... Descriptors,
+              std::enable_if_t<detail::is_route_parameter_descriptor_v<FirstDescriptor> &&
+                               (detail::is_route_parameter_descriptor_v<Descriptors> && ...), int> = 0>
+    void del(const std::string& path, std::shared_ptr<Controller> controller, Method method,
+             RouteDocumentation documentation, FirstDescriptor&& first, Descriptors&&... descriptors)
+    {
+      add_typed_route(path, boost::beast::http::verb::delete_,
+        detail::make_parameterized_member_handler(
+          std::move(controller), method, std::forward<FirstDescriptor>(first),
+          std::forward<Descriptors>(descriptors)...), std::move(documentation));
+    }
+
     template <class Controller, class Method>
     void options(const std::string& path, std::shared_ptr<Controller> controller, Method method)
     {
       add_typed_route(path, boost::beast::http::verb::options,
                       detail::make_typed_member_handler(std::move(controller), method));
+    }
+
+    template <class Controller, class Method, class FirstDescriptor, class... Descriptors,
+              std::enable_if_t<detail::is_route_parameter_descriptor_v<FirstDescriptor> &&
+                               (detail::is_route_parameter_descriptor_v<Descriptors> && ...), int> = 0>
+    void options(const std::string& path, std::shared_ptr<Controller> controller, Method method,
+                 FirstDescriptor&& first, Descriptors&&... descriptors)
+    {
+      add_typed_route(path, boost::beast::http::verb::options,
+        detail::make_parameterized_member_handler(
+          std::move(controller), method, std::forward<FirstDescriptor>(first),
+          std::forward<Descriptors>(descriptors)...));
+    }
+
+    template <class Controller, class Method, class FirstDescriptor, class... Descriptors,
+              std::enable_if_t<detail::is_route_parameter_descriptor_v<FirstDescriptor> &&
+                               (detail::is_route_parameter_descriptor_v<Descriptors> && ...), int> = 0>
+    void options(const std::string& path, std::shared_ptr<Controller> controller, Method method,
+                 RouteDocumentation documentation, FirstDescriptor&& first,
+                 Descriptors&&... descriptors)
+    {
+      add_typed_route(path, boost::beast::http::verb::options,
+        detail::make_parameterized_member_handler(
+          std::move(controller), method, std::forward<FirstDescriptor>(first),
+          std::forward<Descriptors>(descriptors)...), std::move(documentation));
     }
 
     template <class Controller, class Method>
@@ -311,13 +553,15 @@ namespace khttpd::framework
                    std::optional<boost::json::value> request_schema = std::nullopt,
                    std::optional<boost::json::value> response_schema = std::nullopt,
                    bool documented = true,
-                   RouteDocumentation documentation = {});
+                   RouteDocumentation documentation = {},
+                   std::vector<RouteParameterDocumentation> parameters = {});
     void add_typed_route(const std::string& path_pattern, boost::beast::http::verb method,
                          detail::TypedRouteHandler handler, RouteDocumentation documentation = {});
     void record_route_descriptor(const std::string& path, boost::beast::http::verb method,
                                  std::optional<boost::json::value> request_schema = std::nullopt,
                                  std::optional<boost::json::value> response_schema = std::nullopt,
-                                 RouteDocumentation documentation = {});
+                                 RouteDocumentation documentation = {},
+                                 std::vector<RouteParameterDocumentation> parameters = {});
 
     static std::tuple<std::regex, std::vector<std::string>, int, int> parse_path_pattern(
       const std::string& path_pattern);

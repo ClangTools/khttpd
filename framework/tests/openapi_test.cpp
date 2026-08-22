@@ -141,6 +141,72 @@ TEST(OpenApiTest, IncludesLegacyMethodsAndPathParameters)
   EXPECT_EQ(parameter.at("x-khttpd-greedy"), true);
 }
 
+TEST(OpenApiTest, NormalizesColonAndBracePathParameters)
+{
+  fw::HttpRouter router;
+  router.get("/teams/{team_id}/users/:user_id", [](fw::HttpContext&) {});
+
+  const auto document = fw::generate_openapi(router);
+  const auto& operation = operation_at(document, "/teams/{team_id}/users/{user_id}", "get");
+  const auto& parameters = operation.at("parameters").as_array();
+
+  ASSERT_EQ(parameters.size(), 2U);
+  for (std::size_t index = 0; index < parameters.size(); ++index)
+  {
+    const auto& parameter = parameters.at(index).as_object();
+    EXPECT_EQ(parameter.at("in"), "path");
+    EXPECT_EQ(parameter.at("required"), true);
+    EXPECT_EQ(parameter.at("schema").as_object().at("type"), "string");
+  }
+  EXPECT_EQ(parameters.at(0).as_object().at("name"), "team_id");
+  EXPECT_EQ(parameters.at(1).as_object().at("name"), "user_id");
+}
+
+TEST(OpenApiTest, DocumentsTypedRouteParameterDescriptors)
+{
+  fw::HttpRouter router;
+  fw::RouteDocumentation documentation;
+  documentation.summary = "Update a pet";
+  documentation.description = "Updates a pet using bound route parameters.";
+  router.put("/pets/{pet_id}",
+    [](const int pet_id, const OpenApiCreatePetRequest& request, const bool notify,
+       const std::optional<std::string>& tag)
+    {
+      return OpenApiPetResponse{pet_id, notify ? request.name : tag.value_or(request.name), {}};
+    },
+    documentation,
+    fw::PathParam<int>{"pet_id"},
+    fw::Body<OpenApiCreatePetRequest>{},
+    fw::QueryParam<bool>{"notify", false},
+    fw::QueryParam<std::optional<std::string>>{"tag"});
+
+  const auto document = fw::generate_openapi(router);
+  const auto& operation = operation_at(document, "/pets/{pet_id}", "put");
+  EXPECT_EQ(operation.at("summary"), "Update a pet");
+  EXPECT_EQ(operation.at("description"), "Updates a pet using bound route parameters.");
+  const auto& parameters = operation.at("parameters").as_array();
+
+  ASSERT_EQ(parameters.size(), 3U);
+  EXPECT_EQ(parameters.at(0).as_object().at("name"), "pet_id");
+  EXPECT_EQ(parameters.at(0).as_object().at("in"), "path");
+  EXPECT_EQ(parameters.at(0).as_object().at("required"), true);
+  EXPECT_EQ(parameters.at(0).as_object().at("schema").as_object().at("type"), "integer");
+  EXPECT_EQ(parameters.at(1).as_object().at("name"), "notify");
+  EXPECT_EQ(parameters.at(1).as_object().at("in"), "query");
+  EXPECT_EQ(parameters.at(1).as_object().at("required"), false);
+  EXPECT_EQ(parameters.at(1).as_object().at("schema").as_object().at("type"), "boolean");
+  EXPECT_EQ(parameters.at(1).as_object().at("schema").as_object().at("default"), false);
+  EXPECT_EQ(parameters.at(2).as_object().at("name"), "tag");
+  EXPECT_EQ(parameters.at(2).as_object().at("in"), "query");
+  EXPECT_EQ(parameters.at(2).as_object().at("required"), false);
+  EXPECT_EQ(parameters.at(2).as_object().at("schema").as_object().at("type"), "string");
+
+  const auto& request_schema = operation.at("requestBody").as_object().at("content").as_object()
+    .at("application/json").as_object().at("schema").as_object();
+  EXPECT_EQ(request_schema.at("type"), "object");
+  EXPECT_TRUE(request_schema.at("properties").as_object().contains("name"));
+}
+
 TEST(OpenApiTest, IncludesTypedDescribeSchemas)
 {
   fw::HttpRouter router;

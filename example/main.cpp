@@ -41,6 +41,13 @@ namespace
       beast::http::status::bad_request,
       {"INVALID_TYPED_REQUEST", error.what()});
   });
+  http_router.map_exception<khttpd::framework::TypedParameterValidationError>(
+    [](const khttpd::framework::TypedParameterValidationError& error)
+  {
+    return khttpd::framework::HttpResult<GreetingErrorResponse>(
+      beast::http::status::bad_request,
+      {"INVALID_ROUTE_PARAMETER", error.what()});
+  });
   HelloController::create()->register_routes(http_router)->register_routes(ws_router);
   HelloStreamController::create()->register_routes(http_router)->register_routes(ws_router);
   HelloWsController::create()->register_routes(http_router)->register_routes(ws_router);
