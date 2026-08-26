@@ -56,8 +56,45 @@ jobs:
             build --@boost.asio//:ssl=boringssl
 
       - name: Bazel Test
+        id: test
+        shell: bash
         run: |
-          bazel test framework/...
+          set -o pipefail
+          bazel test //framework/... --test_output=errors --test_verbose_timeout_warnings 2>&1 | tee ci-test.log
+      - name: HTTP concurrency benchmark smoke test
+        id: concurrency_benchmark
+        shell: bash
+        run: |
+          set -o pipefail
+          bazel run //framework/tests:concurrency_benchmark -- \
+            --server-threads 2 --concurrency 8 --requests 80 --warmup 8 \
+            2>&1 | tee ci-concurrency-benchmark.log
+      - name: Publish test and benchmark summary
+        if: always()
+        shell: bash
+        env:
+          TEST_RESULT: ${{ steps.test.outcome }}
+          BENCHMARK_RESULT: ${{ steps.concurrency_benchmark.outcome }}
+        run: |
+          summary_file="${GITHUB_STEP_SUMMARY:-}"
+          if [ -n "$summary_file" ]; then
+            {
+              echo "## khttpd framework tests (${{ matrix.os }})"
+              echo
+              echo "| Stage | Result |"
+              echo "| --- | --- |"
+              echo "| Test | ${TEST_RESULT} |"
+              echo "| Benchmark | ${BENCHMARK_RESULT} |"
+              echo
+              echo '```text'
+              sed -n '/khttpd HTTP 并发基准测试/,$p' ci-concurrency-benchmark.log 2>/dev/null || true
+              echo '```'
+            } >> "$summary_file"
+          else
+            echo "khttpd test: ${TEST_RESULT}"
+            echo "khttpd concurrency benchmark: ${BENCHMARK_RESULT}"
+            sed -n '/khttpd HTTP 并发基准测试/,$p' ci-concurrency-benchmark.log 2>/dev/null || true
+          fi
   example:
     needs: build
     strategy:

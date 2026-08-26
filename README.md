@@ -629,6 +629,17 @@ router.map_exception<ValidationError>([](const ValidationError& e) {
 `HttpException` is available when an exception should carry an HTTP status, JSON body, and validated headers directly.
 Unmapped exceptions return a generic JSON 500 response; exception details are logged server-side but are not sent to clients.
 
+### HTTP Concurrency Benchmark
+
+The framework includes a local benchmark that starts a real `Server`, sends concurrent HTTP requests, and reports success/failure counts, throughput, average latency, and p50/p95/p99 latency:
+
+```bash
+bazel run //framework/tests:concurrency_benchmark -- \
+  --server-threads 4 --concurrency 32 --requests 2000 --warmup 100
+```
+
+The defaults are intentionally bounded for development and CI. Adjust `--concurrency`, `--requests`, and `--server-threads` for a capacity test on the target machine. The result is a measurement of this workload, not a fixed framework limit; CPU, memory, file-descriptor limits, kernel backlog, payload size, and connection reuse all affect the supported concurrency.
+
 ## License
 
 MIT License — see [LICENSE](LICENSE) for details.

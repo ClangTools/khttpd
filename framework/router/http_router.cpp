@@ -60,6 +60,20 @@ namespace khttpd::framework
 
   HttpRouter::HttpRouter() = default;
 
+  void HttpRouter::set_base_path(std::string path)
+  {
+    if (!path.empty() && path.front() != '/') throw std::invalid_argument("router base path must start with '/'");
+    while (path.size() > 1 && path.back() == '/') path.pop_back();
+    base_path_ = path == "/" ? std::string{} : std::move(path);
+  }
+
+  std::string HttpRouter::apply_base_path(const std::string& path) const
+  {
+    if (base_path_.empty()) return path;
+    if (path.empty() || path.front() != '/') throw std::invalid_argument("route path must start with '/'");
+    return base_path_ + (path == "/" ? std::string{} : path);
+  }
+
   std::tuple<std::regex, std::vector<std::string>, int, int> HttpRouter::parse_path_pattern(
     const std::string& path_pattern)
   {
@@ -157,30 +171,31 @@ namespace khttpd::framework
                              RouteDocumentation documentation,
                              std::vector<RouteParameterDocumentation> parameters)
   {
+    const auto registered_path = apply_base_path(path_pattern);
     if (documented)
-      record_route_descriptor(path_pattern, method, std::move(request_schema), std::move(response_schema),
+      record_route_descriptor(registered_path, method, std::move(request_schema), std::move(response_schema),
                               std::move(documentation), std::move(parameters));
     else
       route_descriptors_.erase(std::remove_if(route_descriptors_.begin(), route_descriptors_.end(),
         [&](const RouteDescriptor& descriptor)
         {
-          return descriptor.path == path_pattern && descriptor.method == method;
+          return descriptor.path == registered_path && descriptor.method == method;
         }), route_descriptors_.end());
 
     for (auto& entry : routes_)
     {
-      if (entry.original_path == path_pattern)
+      if (entry.original_path == registered_path)
       {
         entry.handlers[method] = std::move(handler);
         spdlog::debug("Updated handler for route: {} {}", std::string(boost::beast::http::to_string(method)),
-                      path_pattern);
+                      registered_path);
         return;
       }
     }
 
     RouteEntry new_entry;
-    new_entry.original_path = path_pattern;
-    auto [regex, params, literal_count, dynamic_count] = parse_path_pattern(path_pattern);
+    new_entry.original_path = registered_path;
+    auto [regex, params, literal_count, dynamic_count] = parse_path_pattern(registered_path);
     new_entry.path_regex = std::move(regex);
     new_entry.param_names = std::move(params);
     new_entry.literal_segments_count = literal_count;
@@ -190,7 +205,7 @@ namespace khttpd::framework
     routes_.push_back(std::move(new_entry));
     std::sort(routes_.begin(), routes_.end(), RouteEntry::compare_specificity);
     spdlog::debug("Registered dynamic route: {} {} (literal:{}, dynamic:{})",
-                  std::string(boost::beast::http::to_string(method)), path_pattern, literal_count, dynamic_count);
+                  std::string(boost::beast::http::to_string(method)), registered_path, literal_count, dynamic_count);
   }
 
   void HttpRouter::add_typed_route(const std::string& path_pattern,
@@ -327,18 +342,19 @@ namespace khttpd::framework
   void HttpRouter::stream(const std::string& path_pattern, const boost::beast::http::verb method,
                           HttpStreamHandler handler)
   {
-    record_route_descriptor(path_pattern, method);
+    const auto registered_path = apply_base_path(path_pattern);
+    record_route_descriptor(registered_path, method);
     for (auto& entry : routes_)
     {
-      if (entry.original_path == path_pattern)
+      if (entry.original_path == registered_path)
       {
         entry.stream_handlers[method] = std::move(handler);
         return;
       }
     }
     RouteEntry entry;
-    entry.original_path = path_pattern;
-    auto [regex, params, literal_count, dynamic_count] = parse_path_pattern(path_pattern);
+    entry.original_path = registered_path;
+    auto [regex, params, literal_count, dynamic_count] = parse_path_pattern(registered_path);
     entry.path_regex = std::move(regex);
     entry.param_names = std::move(params);
     entry.literal_segments_count = literal_count;
@@ -437,18 +453,19 @@ namespace khttpd::framework
   void HttpRouter::async_route(const std::string& path, boost::beast::http::verb method,
                                HttpAsyncHandler handler)
   {
-    record_route_descriptor(path, method);
-    auto [path_regex, param_names, literal_count, dynamic_count] = parse_path_pattern(path);
+    const auto registered_path = apply_base_path(path);
+    record_route_descriptor(registered_path, method);
+    auto [path_regex, param_names, literal_count, dynamic_count] = parse_path_pattern(registered_path);
     for (auto& entry : routes_)
     {
-      if (entry.original_path == path)
+      if (entry.original_path == registered_path)
       {
         entry.async_handlers[method] = std::move(handler);
         return;
       }
     }
     RouteEntry entry;
-    entry.original_path = path;
+    entry.original_path = registered_path;
     entry.path_regex = std::move(path_regex);
     entry.param_names = std::move(param_names);
     entry.literal_segments_count = literal_count;

@@ -65,6 +65,14 @@ jobs:
         run: |
           set -o pipefail
           bazel test //framework/... --test_output=errors --test_verbose_timeout_warnings --verbose_failures 2>&1 | tee ci-test.log
+      - name: HTTP concurrency benchmark smoke test
+        id: concurrency_benchmark
+        shell: bash
+        run: |
+          set -o pipefail
+          bazel run //framework/tests:concurrency_benchmark -- \
+            --server-threads 2 --concurrency 8 --requests 80 --warmup 8 \
+            2>&1 | tee ci-concurrency-benchmark.log
       - name: Upload failed test logs
         if: failure()
         uses: actions/upload-artifact@v4
@@ -73,6 +81,7 @@ jobs:
           path: |
             bazel-testlogs/**
             ci-test.log
+            ci-concurrency-benchmark.log
           if-no-files-found: ignore
           retention-days: 3
       - name: Publish test summary
@@ -92,6 +101,20 @@ jobs:
             echo
             echo "- Ref: \`${GITHUB_REF}\`"
             echo "- Commit: \`${GITHUB_SHA}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
+          {
+            echo
+            echo "### HTTP concurrency benchmark smoke test"
+            echo
+            echo "| Stage | Result |"
+            echo "| --- | --- |"
+            echo "| Benchmark | ${{ steps.concurrency_benchmark.outcome }} |"
+            if [ -f ci-concurrency-benchmark.log ]; then
+              echo
+              echo '```text'
+              sed -n '/khttpd HTTP/,$p' ci-concurrency-benchmark.log
+              echo '```'
+            fi
           } >> "${GITHUB_STEP_SUMMARY}"
           FAILED_LOG_ARTIFACT=khttpd-${{ matrix.os }}-test-diagnostics \
             .github/scripts/write_failure_summary.sh
