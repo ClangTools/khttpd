@@ -112,7 +112,7 @@ jobs:
             if [ -f ci-concurrency-benchmark.log ]; then
               echo
               echo '```text'
-              sed -n '/khttpd HTTP concurrency benchmark/,$p' ci-concurrency-benchmark.log
+              sed -n '/khttpd HTTP/,$p' ci-concurrency-benchmark.log
               echo '```'
             fi
           } >> "${GITHUB_STEP_SUMMARY}"
