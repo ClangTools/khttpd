@@ -4,6 +4,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <numeric>
+#include <iomanip>
+#include <sstream>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -51,4 +54,30 @@ namespace khttpd::framework::benchmark
     std::size_t successes_;
     std::size_t failures_;
   };
+
+  inline std::string format_report(const Stats& stats, int server_threads, int concurrency, int requests)
+  {
+    const auto total = stats.successes() + stats.failures();
+    const auto success_rate = total == 0 ? 0.0 : static_cast<double>(stats.successes()) * 100.0 / static_cast<double>(total);
+    std::ostringstream report;
+    report << "========================================\n"
+           << "khttpd HTTP 并发基准测试\n"
+           << "========================================\n"
+           << "测试配置\n"
+           << "  服务端线程数   : " << server_threads << "\n"
+           << "  并发客户端数   : " << concurrency << "\n"
+           << "  请求总数       : " << requests << "\n"
+           << "----------------------------------------\n"
+           << "测试结果\n"
+           << "  成功请求数     : " << stats.successes() << "\n"
+           << "  失败请求数     : " << stats.failures() << "\n"
+           << "  成功率         : " << std::fixed << std::setprecision(2) << success_rate << "%\n"
+           << "  吞吐量         : " << std::setprecision(2) << stats.requests_per_second() << " req/s\n"
+           << "  平均延迟       : " << std::setprecision(2) << stats.average_latency_us() << " us\n"
+           << "  p50 延迟       : " << stats.percentile(0.50) << " us\n"
+           << "  p95 延迟       : " << stats.percentile(0.95) << " us\n"
+           << "  p99 延迟       : " << stats.percentile(0.99) << " us\n"
+           << "========================================\n";
+    return report.str();
+  }
 }

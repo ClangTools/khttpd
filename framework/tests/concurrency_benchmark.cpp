@@ -190,17 +190,7 @@ int main(int argc, char** argv)
     server_thread.join();
 
     const khttpd_fw::benchmark::Stats stats(std::move(latencies), elapsed_us, successes.load(), failures.load());
-    std::cout << "khttpd HTTP concurrency benchmark\n"
-              << "  server_threads: " << options.server_threads << "\n"
-              << "  concurrency: " << options.concurrency << "\n"
-              << "  requests: " << options.requests << "\n"
-              << "  succeeded: " << stats.successes() << "\n"
-              << "  failed: " << stats.failures() << "\n"
-              << "  throughput_req_per_sec: " << stats.requests_per_second() << "\n"
-              << "  latency_avg_us: " << stats.average_latency_us() << "\n"
-              << "  latency_p50_us: " << stats.percentile(0.50) << "\n"
-              << "  latency_p95_us: " << stats.percentile(0.95) << "\n"
-              << "  latency_p99_us: " << stats.percentile(0.99) << "\n";
+    std::cout << khttpd_fw::benchmark::format_report(stats, options.server_threads, options.concurrency, options.requests);
     return stats.failures() == 0 ? 0 : 1;
   }
   catch (const std::exception& error)
