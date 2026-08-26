@@ -1,4 +1,4 @@
-load("@rules_cc//cc:defs.bzl", "cc_test")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_test")
 
 cc_test(
     name = "sse_test",
@@ -9,6 +9,20 @@ cc_test(
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
+)
+
+cc_binary(
+    name = "concurrency_benchmark",
+    srcs = [
+        "concurrency_benchmark.cpp",
+        "concurrency_benchmark.hpp",
+    ],
+    copts = [
+        "-std=c++17",
+        "-Wall",
+        "-pedantic",
+    ],
+    deps = ["//framework"],
 )
 
 cc_test(
@@ -261,6 +275,23 @@ cc_test(
     }),
     deps = [
         "//framework",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "concurrency_benchmark_test",
+    srcs = [
+        "concurrency_benchmark_test.cpp",
+        "concurrency_benchmark.hpp",
+    ],
+    copts = [
+        "-std=c++17",
+        "-Wall",
+        "-pedantic",
+    ],
+    deps = [
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
