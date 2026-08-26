@@ -1,6 +1,7 @@
 #include "websocket_router.hpp"
 
 #include <algorithm>
+#include <stdexcept>
 #include <spdlog/spdlog.h>
 #include "websocket/websocket_session.hpp"
 
@@ -18,18 +19,26 @@ namespace khttpd::framework
 
   WebsocketRouter::WebsocketRouter() = default;
 
+  void WebsocketRouter::set_base_path(std::string path)
+  {
+    if (!path.empty() && path.front() != '/') throw std::invalid_argument("router base path must start with '/'");
+    while (path.size() > 1 && path.back() == '/') path.pop_back();
+    base_path_ = path == "/" ? std::string{} : std::move(path);
+  }
+
   void WebsocketRouter::add_handler(const std::string& path, WebsocketOpenHandler on_open,
                                     WebsocketMessageHandler on_message, WebsocketCloseHandler on_close,
                                     WebsocketErrorHandler on_error)
   {
+    const auto registered_path = base_path_.empty() ? path : base_path_ + path;
     WebsocketRouteEntry entry{std::move(on_open), std::move(on_message), std::move(on_close), std::move(on_error)};
     std::unique_lock lock(handlers_mutex_);
     for (auto& route : handlers_)
-      if (route.original_path == path) { route.handlers = std::move(entry); return; }
-    auto [regex, params, literal_count, dynamic_count] = parse_path_pattern(path);
-    handlers_.push_back({path, std::move(regex), std::move(params), literal_count, dynamic_count, std::move(entry)});
+      if (route.original_path == registered_path) { route.handlers = std::move(entry); return; }
+    auto [regex, params, literal_count, dynamic_count] = parse_path_pattern(registered_path);
+    handlers_.push_back({registered_path, std::move(regex), std::move(params), literal_count, dynamic_count, std::move(entry)});
     std::sort(handlers_.begin(), handlers_.end(), WebsocketRoute::compare_specificity);
-    spdlog::debug("Registered WebSocket handlers for path: {}", path);
+    spdlog::debug("Registered WebSocket handlers for path: {}", registered_path);
   }
 
   void WebsocketRouter::dispatch_open(const std::string& path, WebsocketContext& ctx)

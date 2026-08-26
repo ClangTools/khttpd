@@ -54,6 +54,9 @@ namespace khttpd::framework
   public:
     WebsocketRouter();
 
+    void set_base_path(std::string path);
+    const std::string& base_path() const { return base_path_; }
+
     void add_handler(const std::string& path,
                      WebsocketOpenHandler on_open = {nullptr},
                      WebsocketMessageHandler on_message = {nullptr},
@@ -70,6 +73,7 @@ namespace khttpd::framework
     void dispatch(const std::string& path, WebsocketContext& ctx,
                   const std::function<void(const WebsocketRouteEntry&)>& invoke);
     std::vector<WebsocketRoute> handlers_;
+    std::string base_path_;
     mutable std::shared_mutex handlers_mutex_;
   };
 }

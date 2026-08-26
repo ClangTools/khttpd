@@ -89,6 +89,25 @@ TEST(HttpRouterTest, StaticRouteMatching)
   ASSERT_EQ(ctx2.get_response().result(), http::status::not_found);
 }
 
+TEST(HttpRouterTest, GlobalBasePathPrefixesRoutesAndOpenApiDescriptors)
+{
+  khttpd_fw::HttpRouter router;
+  router.set_base_path("/gateway/api/");
+  bool called = false;
+  router.get("/health", [&](khttpd_fw::HttpContext& ctx) { called = true; ctx.set_status(http::status::ok); },
+             {"Health", "Health check"});
+
+  auto req = make_request(http::verb::get, "/gateway/api/health");
+  http::response<http::string_body> res;
+  auto ctx = create_http_context(req, res);
+  router.dispatch(ctx);
+
+  EXPECT_TRUE(called);
+  EXPECT_EQ(res.result(), http::status::ok);
+  ASSERT_EQ(router.route_descriptors().size(), 1U);
+  EXPECT_EQ(router.route_descriptors().front().path, "/gateway/api/health");
+}
+
 TEST(HttpRouterTest, DynamicRouteMatchingAndParamExtraction)
 {
   khttpd_fw::HttpRouter router;

@@ -91,6 +91,9 @@ namespace khttpd::framework
   public:
     HttpRouter();
 
+    void set_base_path(std::string path);
+    const std::string& base_path() const { return base_path_; }
+
     void get(const std::string& path, HttpHandler handler);
     void post(const std::string& path, HttpHandler handler);
     void put(const std::string& path, HttpHandler handler);
@@ -542,6 +545,7 @@ namespace khttpd::framework
 
     std::vector<RouteEntry> routes_;
     std::vector<RouteDescriptor> route_descriptors_;
+    std::string base_path_;
     std::vector<std::shared_ptr<Interceptor>> interceptors_;
 
     std::vector<std::shared_ptr<ExceptionHandlerBase>> exception_handlers_;
@@ -555,6 +559,7 @@ namespace khttpd::framework
                    bool documented = true,
                    RouteDocumentation documentation = {},
                    std::vector<RouteParameterDocumentation> parameters = {});
+    std::string apply_base_path(const std::string& path) const;
     void add_typed_route(const std::string& path_pattern, boost::beast::http::verb method,
                          detail::TypedRouteHandler handler, RouteDocumentation documentation = {});
     void record_route_descriptor(const std::string& path, boost::beast::http::verb method,
