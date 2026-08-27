@@ -5,18 +5,16 @@
 #include <optional>
 #include <string>
 
-namespace khttpd::framework::sse
-{
-  struct SseEvent
-  {
-    std::string event;
-    std::string data;
-    std::string id;
-    std::optional<std::uint64_t> retry;
-  };
+namespace khttpd::framework::sse {
+struct SseEvent {
+  std::string event;
+  std::string data;
+  std::string id;
+  std::optional<std::uint64_t> retry;
+};
 
-  std::string format_sse_event(const SseEvent& event);
-  std::string format_sse_comment(const std::string& comment);
-}
+std::string format_sse_event(const SseEvent& event);
+std::string format_sse_comment(const std::string& comment);
+}  // namespace khttpd::framework::sse
 
 #endif

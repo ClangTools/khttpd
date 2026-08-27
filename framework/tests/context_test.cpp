@@ -1,6 +1,8 @@
-#include "framework/context/http_context.hpp"
 #include <gtest/gtest.h>
-#include <boost/beast/http/empty_body.hpp> // For empty body requests
+
+#include <boost/beast/http/empty_body.hpp>  // For empty body requests
+
+#include "framework/context/http_context.hpp"
 
 namespace beast = boost::beast;
 namespace http = beast::http;
@@ -9,15 +11,11 @@ namespace khttpd_fw = khttpd::framework;
 
 // Helper function to create a request for testing
 template <class Body = http::string_body>
-http::request<Body> make_request(
-  http::verb method,
-  const std::string& target,
-  int version = 11,
-  const std::string& body_str = "")
-{
+http::request<Body> make_request(http::verb method, const std::string& target,
+                                 int version = 11,
+                                 const std::string& body_str = "") {
   http::request<Body> req(method, target, version);
-  if (!body_str.empty())
-  {
+  if (!body_str.empty()) {
     req.body() = body_str;
     req.prepare_payload();
   }
@@ -25,16 +23,14 @@ http::request<Body> make_request(
 }
 
 // Helper to create HttpContext with dummy response
-khttpd_fw::HttpContext create_context(
-  http::request<http::string_body>& req,
-  http::response<http::string_body>& res)
-{
+khttpd_fw::HttpContext create_context(http::request<http::string_body>& req,
+                                      http::response<http::string_body>& res) {
   return khttpd_fw::HttpContext(req, res);
 }
 
-TEST(HttpContextTest, PathAndMethod)
-{
-  http::request<http::string_body> req = make_request(http::verb::get, "/users/123?q=test");
+TEST(HttpContextTest, PathAndMethod) {
+  http::request<http::string_body> req =
+      make_request(http::verb::get, "/users/123?q=test");
   http::response<http::string_body> res;
   khttpd_fw::HttpContext ctx = create_context(req, res);
 
@@ -42,9 +38,9 @@ TEST(HttpContextTest, PathAndMethod)
   ASSERT_EQ(ctx.method(), http::verb::get);
 }
 
-TEST(HttpContextTest, QueryParameters)
-{
-  http::request<http::string_body> req = make_request(http::verb::get, "/search?query=boost+beast&page=2");
+TEST(HttpContextTest, QueryParameters) {
+  http::request<http::string_body> req =
+      make_request(http::verb::get, "/search?query=boost+beast&page=2");
   http::response<http::string_body> res;
   khttpd_fw::HttpContext ctx = create_context(req, res);
 
@@ -57,8 +53,7 @@ TEST(HttpContextTest, QueryParameters)
   ASSERT_FALSE(ctx.get_query_param("non_existent").has_value());
 }
 
-TEST(HttpContextTest, Headers)
-{
+TEST(HttpContextTest, Headers) {
   http::request<http::string_body> req = make_request(http::verb::get, "/");
   req.set(http::field::user_agent, "Test-Agent/1.0");
   req.set("X-Custom-Header", "CustomValue");
@@ -74,10 +69,10 @@ TEST(HttpContextTest, Headers)
   ASSERT_FALSE(ctx.get_header("Non-Existent-Header").has_value());
 }
 
-TEST(HttpContextTest, JsonBody)
-{
+TEST(HttpContextTest, JsonBody) {
   std::string json_str = R"({"name": "Alice", "age": 30})";
-  http::request<http::string_body> req = make_request(http::verb::post, "/api/json", 11, json_str);
+  http::request<http::string_body> req =
+      make_request(http::verb::post, "/api/json", 11, json_str);
   req.set(http::field::content_type, "application/json");
   http::response<http::string_body> res;
   khttpd_fw::HttpContext ctx = create_context(req, res);
@@ -89,10 +84,11 @@ TEST(HttpContextTest, JsonBody)
   ASSERT_EQ(ctx.get_json().value().at("age").as_int64(), 30);
 }
 
-TEST(HttpContextTest, InvalidJsonBody)
-{
-  std::string invalid_json_str = R"({"name": "Alice", "age": })"; // Malformed JSON
-  http::request<http::string_body> req = make_request(http::verb::post, "/api/json", 11, invalid_json_str);
+TEST(HttpContextTest, InvalidJsonBody) {
+  std::string invalid_json_str =
+      R"({"name": "Alice", "age": })";  // Malformed JSON
+  http::request<http::string_body> req =
+      make_request(http::verb::post, "/api/json", 11, invalid_json_str);
   req.set(http::field::content_type, "application/json");
   http::response<http::string_body> res;
   khttpd_fw::HttpContext ctx = create_context(req, res);
@@ -100,10 +96,10 @@ TEST(HttpContextTest, InvalidJsonBody)
   ASSERT_FALSE(ctx.get_json().has_value());
 }
 
-TEST(HttpContextTest, FormUrlEncodedBody)
-{
+TEST(HttpContextTest, FormUrlEncodedBody) {
   std::string form_str = "param1=value1&param2=value%202";
-  http::request<http::string_body> req = make_request(http::verb::post, "/api/form", 11, form_str);
+  http::request<http::string_body> req =
+      make_request(http::verb::post, "/api/form", 11, form_str);
   req.set(http::field::content_type, "application/x-www-form-urlencoded");
   http::response<http::string_body> res;
   khttpd_fw::HttpContext ctx = create_context(req, res);
@@ -115,26 +111,33 @@ TEST(HttpContextTest, FormUrlEncodedBody)
   ASSERT_FALSE(ctx.get_form_param("non_existent").has_value());
 }
 
-TEST(HttpContextTest, MultipartFormData)
-{
+TEST(HttpContextTest, MultipartFormData) {
   std::string boundary = "----------WebKitFormBoundary12345";
   std::string multipart_body =
-    "--" + boundary + "\r\n"
-    "Content-Disposition: form-data; name=\"description\"\r\n\r\n"
-    "This is a test description.\r\n"
-    "--" + boundary + "\r\n"
-    "Content-Disposition: form-data; name=\"file\"; filename=\"my_test.txt\"\r\n"
-    "Content-Type: text/plain\r\n\r\n"
-    "Hello, world!\r\n"
-    "--" + boundary + "--\r\n";
+      "--" + boundary +
+      "\r\n"
+      "Content-Disposition: form-data; name=\"description\"\r\n\r\n"
+      "This is a test description.\r\n"
+      "--" +
+      boundary +
+      "\r\n"
+      "Content-Disposition: form-data; name=\"file\"; "
+      "filename=\"my_test.txt\"\r\n"
+      "Content-Type: text/plain\r\n\r\n"
+      "Hello, world!\r\n"
+      "--" +
+      boundary + "--\r\n";
 
-  http::request<http::string_body> req = make_request(http::verb::post, "/api/upload", 11, multipart_body);
-  req.set(http::field::content_type, "multipart/form-data; boundary=" + boundary);
+  http::request<http::string_body> req =
+      make_request(http::verb::post, "/api/upload", 11, multipart_body);
+  req.set(http::field::content_type,
+          "multipart/form-data; boundary=" + boundary);
   http::response<http::string_body> res;
   khttpd_fw::HttpContext ctx = create_context(req, res);
 
   ASSERT_TRUE(ctx.get_multipart_field("description").has_value());
-  ASSERT_EQ(ctx.get_multipart_field("description").value(), "This is a test description.");
+  ASSERT_EQ(ctx.get_multipart_field("description").value(),
+            "This is a test description.");
 
   const auto* files = ctx.get_uploaded_files("file");
   ASSERT_NE(files, nullptr);
@@ -148,8 +151,7 @@ TEST(HttpContextTest, MultipartFormData)
 }
 
 // Test response setters
-TEST(HttpContextTest, ResponseSetters)
-{
+TEST(HttpContextTest, ResponseSetters) {
   http::request<http::string_body> req = make_request(http::verb::get, "/");
   http::response<http::string_body> res;
   khttpd_fw::HttpContext ctx = create_context(req, res);
@@ -168,11 +170,12 @@ TEST(HttpContextTest, ResponseSetters)
   ASSERT_EQ(actual_res["X-Framework-Version"], "1.0");
 }
 
-TEST(HttpContextTest, Cookies)
-{
+TEST(HttpContextTest, Cookies) {
   http::request<http::string_body> req = make_request(http::verb::get, "/");
   req.set(http::field::cookie, "session_id=12345; user=alice");
-  req.insert(http::field::cookie, "theme=dark; user=bob"); // Multiple headers, multiple values for 'user'
+  req.insert(
+      http::field::cookie,
+      "theme=dark; user=bob");  // Multiple headers, multiple values for 'user'
   http::response<http::string_body> res;
   khttpd_fw::HttpContext ctx = create_context(req, res);
 
@@ -193,8 +196,7 @@ TEST(HttpContextTest, Cookies)
   ASSERT_TRUE(ctx.get_cookies("non_existent").empty());
 }
 
-TEST(HttpContextTest, SetCookie)
-{
+TEST(HttpContextTest, SetCookie) {
   http::request<http::string_body> req = make_request(http::verb::get, "/");
   http::response<http::string_body> res;
   khttpd_fw::HttpContext ctx = create_context(req, res);
@@ -212,36 +214,35 @@ TEST(HttpContextTest, SetCookie)
   auto& actual_res = ctx.get_response();
   auto range = actual_res.equal_range(http::field::set_cookie);
   std::vector<std::string> cookies;
-  for(auto it = range.first; it != range.second; ++it) {
-      cookies.emplace_back(it->value());
+  for (auto it = range.first; it != range.second; ++it) {
+    cookies.emplace_back(it->value());
   }
 
   ASSERT_EQ(cookies.size(), 2);
-  
+
   bool found_foo = false;
   bool found_user = false;
 
   for (const auto& c : cookies) {
-      if (c.find("foo=bar") != std::string::npos) {
-          found_foo = true;
-      }
-      if (c.find("user=123") != std::string::npos) {
-          found_user = true;
-          ASSERT_NE(c.find("Max-Age=3600"), std::string::npos);
-          ASSERT_NE(c.find("HttpOnly"), std::string::npos);
-          ASSERT_NE(c.find("Secure"), std::string::npos);
-          ASSERT_NE(c.find("Path=/api"), std::string::npos);
-          ASSERT_NE(c.find("Domain=example.com"), std::string::npos);
-          ASSERT_NE(c.find("SameSite=Strict"), std::string::npos);
-      }
+    if (c.find("foo=bar") != std::string::npos) {
+      found_foo = true;
+    }
+    if (c.find("user=123") != std::string::npos) {
+      found_user = true;
+      ASSERT_NE(c.find("Max-Age=3600"), std::string::npos);
+      ASSERT_NE(c.find("HttpOnly"), std::string::npos);
+      ASSERT_NE(c.find("Secure"), std::string::npos);
+      ASSERT_NE(c.find("Path=/api"), std::string::npos);
+      ASSERT_NE(c.find("Domain=example.com"), std::string::npos);
+      ASSERT_NE(c.find("SameSite=Strict"), std::string::npos);
+    }
   }
   ASSERT_TRUE(found_foo);
   ASSERT_TRUE(found_user);
 }
 
 // Test set_body_json and set_body_from
-TEST(HttpContextTest, SetBodyJson)
-{
+TEST(HttpContextTest, SetBodyJson) {
   http::request<http::string_body> req = make_request(http::verb::get, "/");
   http::response<http::string_body> res;
   khttpd_fw::HttpContext ctx(req, res);
@@ -257,8 +258,7 @@ TEST(HttpContextTest, SetBodyJson)
   ASSERT_EQ(actual_res.body(), R"({"status":"ok","count":42})");
 }
 
-TEST(HttpContextTest, SetBodyFrom)
-{
+TEST(HttpContextTest, SetBodyFrom) {
   http::request<http::string_body> req = make_request(http::verb::get, "/");
   http::response<http::string_body> res;
   khttpd_fw::HttpContext ctx(req, res);
@@ -276,8 +276,7 @@ TEST(HttpContextTest, SetBodyFrom)
 }
 
 // Test path params set/get directly
-TEST(HttpContextTest, PathParamsWithoutDispatch)
-{
+TEST(HttpContextTest, PathParamsWithoutDispatch) {
   http::request<http::string_body> req = make_request(http::verb::get, "/");
   http::response<http::string_body> res;
   khttpd_fw::HttpContext ctx(req, res);
@@ -293,8 +292,7 @@ TEST(HttpContextTest, PathParamsWithoutDispatch)
 }
 
 // Test context attributes
-TEST(HttpContextTest, Attributes)
-{
+TEST(HttpContextTest, Attributes) {
   http::request<http::string_body> req = make_request(http::verb::get, "/");
   http::response<http::string_body> res;
   khttpd_fw::HttpContext ctx(req, res);
@@ -320,8 +318,7 @@ TEST(HttpContextTest, Attributes)
 }
 
 // Test header case insensitivity
-TEST(HttpContextTest, HeaderCaseInsensitive)
-{
+TEST(HttpContextTest, HeaderCaseInsensitive) {
   http::request<http::string_body> req = make_request(http::verb::get, "/");
   req.set("X-Custom-Header", "value1");
   http::response<http::string_body> res;
@@ -333,8 +330,7 @@ TEST(HttpContextTest, HeaderCaseInsensitive)
 }
 
 // Test set_cookie rejects invalid key characters
-TEST(HttpContextTest, InvalidCookieKeyChars)
-{
+TEST(HttpContextTest, InvalidCookieKeyChars) {
   http::request<http::string_body> req = make_request(http::verb::get, "/");
   http::response<http::string_body> res;
   khttpd_fw::HttpContext ctx(req, res);
@@ -345,13 +341,14 @@ TEST(HttpContextTest, InvalidCookieKeyChars)
   auto& actual_res = ctx.get_response();
   auto range = actual_res.equal_range(http::field::set_cookie);
   int count = 0;
-  for(auto it = range.first; it != range.second; ++it) { count++; }
-  ASSERT_EQ(count, 0); // No cookies should be set
+  for (auto it = range.first; it != range.second; ++it) {
+    count++;
+  }
+  ASSERT_EQ(count, 0);  // No cookies should be set
 }
 
 // Test set_cookie rejects invalid value characters
-TEST(HttpContextTest, InvalidCookieValueChars)
-{
+TEST(HttpContextTest, InvalidCookieValueChars) {
   http::request<http::string_body> req = make_request(http::verb::get, "/");
   http::response<http::string_body> res;
   khttpd_fw::HttpContext ctx(req, res);
@@ -362,13 +359,14 @@ TEST(HttpContextTest, InvalidCookieValueChars)
   auto& actual_res = ctx.get_response();
   auto range = actual_res.equal_range(http::field::set_cookie);
   int count = 0;
-  for(auto it = range.first; it != range.second; ++it) { count++; }
-  ASSERT_EQ(count, 0); // No cookies should be set
+  for (auto it = range.first; it != range.second; ++it) {
+    count++;
+  }
+  ASSERT_EQ(count, 0);  // No cookies should be set
 }
 
 // Test empty path
-TEST(HttpContextTest, EmptyPath)
-{
+TEST(HttpContextTest, EmptyPath) {
   http::request<http::string_body> req = make_request(http::verb::get, "");
   http::response<http::string_body> res;
   khttpd_fw::HttpContext ctx(req, res);
@@ -377,10 +375,10 @@ TEST(HttpContextTest, EmptyPath)
 }
 
 // Test JSON array body
-TEST(HttpContextTest, JsonArrayBody)
-{
+TEST(HttpContextTest, JsonArrayBody) {
   std::string json_str = R"([1, "two", {"key": "value"}])";
-  http::request<http::string_body> req = make_request(http::verb::post, "/api/array", 11, json_str);
+  http::request<http::string_body> req =
+      make_request(http::verb::post, "/api/array", 11, json_str);
   req.set(http::field::content_type, "application/json");
   http::response<http::string_body> res;
   khttpd_fw::HttpContext ctx(req, res);

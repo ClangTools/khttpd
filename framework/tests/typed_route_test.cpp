@@ -1,10 +1,10 @@
-#include "framework/exception/http_exception.hpp"
+#include <boost/beast/http.hpp>
+
 #include "framework/context/http_context.hpp"
 #include "framework/controller/http_controller.hpp"
+#include "framework/exception/http_exception.hpp"
 #include "framework/router/http_result.hpp"
 #include "framework/router/http_router.hpp"
-
-#include <boost/beast/http.hpp>
 #if defined(__clang__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wgnu-zero-variadic-macro-arguments"
@@ -15,18 +15,17 @@
 #pragma GCC diagnostic ignored "-Wvariadic-macros"
 #pragma GCC diagnostic ignored "-Wpedantic"
 #endif
-#include <boost/describe.hpp>
-#include <boost/json.hpp>
 #include <gtest/gtest.h>
 
+#include <boost/describe.hpp>
+#include <boost/json.hpp>
 #include <stdexcept>
 #include <string>
 
 namespace http = boost::beast::http;
 namespace fw = khttpd::framework;
 
-struct DescribedPayload
-{
+struct DescribedPayload {
   int value;
 };
 
@@ -37,118 +36,113 @@ BOOST_DESCRIBE_STRUCT(DescribedPayload, (), (value))
 #pragma GCC diagnostic pop
 #endif
 
-namespace
-{
-  struct Reply
-  {
-    int id;
-    std::string name;
-  };
+namespace {
+struct Reply {
+  int id;
+  std::string name;
+};
 
-  struct CreateRequest
-  {
-    std::string name;
-    int age;
-  };
+struct CreateRequest {
+  std::string name;
+  int age;
+};
 
-  struct ErrorReply
-  {
-    std::string code;
-    std::string message;
-  };
+struct ErrorReply {
+  std::string code;
+  std::string message;
+};
 
-  class ValidationError : public std::runtime_error
-  {
-  public:
-    using std::runtime_error::runtime_error;
-  };
+class ValidationError : public std::runtime_error {
+ public:
+  using std::runtime_error::runtime_error;
+};
 
-  CreateRequest tag_invoke(boost::json::value_to_tag<CreateRequest>, const boost::json::value& value)
-  {
-    const auto& object = value.as_object();
-    return {
+CreateRequest tag_invoke(boost::json::value_to_tag<CreateRequest>,
+                         const boost::json::value& value) {
+  const auto& object = value.as_object();
+  return {
       boost::json::value_to<std::string>(object.at("name")),
       boost::json::value_to<int>(object.at("age")),
-    };
-  }
-
-  void tag_invoke(boost::json::value_from_tag, boost::json::value& value, const ErrorReply& error)
-  {
-    value = {
-      {"code", error.code},
-      {"message", error.message},
-    };
-  }
-
-  void tag_invoke(boost::json::value_from_tag, boost::json::value& value, const Reply& reply)
-  {
-    value = {
-      {"id", reply.id},
-      {"name", reply.name},
-    };
-  }
-
-  fw::HttpContext make_context(http::request<http::string_body>& request,
-                               http::response<http::string_body>& response)
-  {
-    return fw::HttpContext(request, response);
-  }
-
-  http::request<http::string_body> json_request(const std::string& target, const std::string& body)
-  {
-    http::request<http::string_body> request(http::verb::post, target, 11);
-    request.set(http::field::content_type, "application/json");
-    request.body() = body;
-    request.prepare_payload();
-    return request;
-  }
-
-  class TypedController final : public fw::BaseController<TypedController>
-  {
-  public:
-    std::shared_ptr<BaseController> register_routes(fw::HttpRouter& router) override
-    {
-      KHTTPD_TYPED_ROUTE(post, "/member", create);
-      KHTTPD_TYPED_ROUTE(post, "/const-member", lookup);
-      KHTTPD_TYPED_ROUTE(post, "/with-context", with_context);
-      router.put("/parameterized/{id}", shared_from_this(), &TypedController::parameterized,
-                 fw::PathParam<int>{"id"}, fw::QueryParam<bool>{"notify", false});
-      router.get("/parameterized-get/{id}", shared_from_this(), &TypedController::parameterized,
-                 fw::PathParam<int>{"id"}, fw::QueryParam<bool>{"notify", false});
-      router.post("/parameterized-post/{id}", shared_from_this(), &TypedController::parameterized,
-                  fw::PathParam<int>{"id"}, fw::QueryParam<bool>{"notify", false});
-      router.del("/parameterized-delete/{id}", shared_from_this(), &TypedController::parameterized,
-                 fw::PathParam<int>{"id"}, fw::QueryParam<bool>{"notify", false});
-      router.options("/parameterized-options/{id}", shared_from_this(), &TypedController::parameterized,
-                     fw::PathParam<int>{"id"}, fw::QueryParam<bool>{"notify", false});
-      return shared_from_this();
-    }
-
-  private:
-    fw::HttpResult<Reply> create(const CreateRequest& request)
-    {
-      return fw::HttpResult<Reply>::created(Reply{request.age, request.name});
-    }
-
-    Reply lookup(const CreateRequest& request) const
-    {
-      return Reply{request.age + 1, request.name};
-    }
-
-    Reply with_context(const CreateRequest& request, fw::HttpContext& context)
-    {
-      return Reply{request.age, context.get_header("X-Display-Name").value_or(request.name)};
-    }
-
-    Reply parameterized(const int id, const bool notify, fw::HttpContext& context)
-    {
-      return Reply{id, notify ? context.path() : "quiet"};
-    }
   };
 }
 
-TEST(HttpResultTest, AppliesStatusJsonBodyAndCustomHeaders)
-{
+void tag_invoke(boost::json::value_from_tag, boost::json::value& value,
+                const ErrorReply& error) {
+  value = {
+      {"code", error.code},
+      {"message", error.message},
+  };
+}
+
+void tag_invoke(boost::json::value_from_tag, boost::json::value& value,
+                const Reply& reply) {
+  value = {
+      {"id", reply.id},
+      {"name", reply.name},
+  };
+}
+
+fw::HttpContext make_context(http::request<http::string_body>& request,
+                             http::response<http::string_body>& response) {
+  return fw::HttpContext(request, response);
+}
+
+http::request<http::string_body> json_request(const std::string& target,
+                                              const std::string& body) {
+  http::request<http::string_body> request(http::verb::post, target, 11);
+  request.set(http::field::content_type, "application/json");
+  request.body() = body;
+  request.prepare_payload();
+  return request;
+}
+
+class TypedController final : public fw::BaseController<TypedController> {
+ public:
+  std::shared_ptr<BaseController> register_routes(
+      fw::HttpRouter& router) override {
+    KHTTPD_TYPED_ROUTE(post, "/member", create);
+    KHTTPD_TYPED_ROUTE(post, "/const-member", lookup);
+    KHTTPD_TYPED_ROUTE(post, "/with-context", with_context);
+    router.put("/parameterized/{id}", shared_from_this(),
+               &TypedController::parameterized, fw::PathParam<int>{"id"},
+               fw::QueryParam<bool>{"notify", false});
+    router.get("/parameterized-get/{id}", shared_from_this(),
+               &TypedController::parameterized, fw::PathParam<int>{"id"},
+               fw::QueryParam<bool>{"notify", false});
+    router.post("/parameterized-post/{id}", shared_from_this(),
+                &TypedController::parameterized, fw::PathParam<int>{"id"},
+                fw::QueryParam<bool>{"notify", false});
+    router.del("/parameterized-delete/{id}", shared_from_this(),
+               &TypedController::parameterized, fw::PathParam<int>{"id"},
+               fw::QueryParam<bool>{"notify", false});
+    router.options("/parameterized-options/{id}", shared_from_this(),
+                   &TypedController::parameterized, fw::PathParam<int>{"id"},
+                   fw::QueryParam<bool>{"notify", false});
+    return shared_from_this();
+  }
+
+ private:
+  fw::HttpResult<Reply> create(const CreateRequest& request) {
+    return fw::HttpResult<Reply>::created(Reply{request.age, request.name});
+  }
+
+  Reply lookup(const CreateRequest& request) const {
+    return Reply{request.age + 1, request.name};
+  }
+
+  Reply with_context(const CreateRequest& request, fw::HttpContext& context) {
+    return Reply{request.age,
+                 context.get_header("X-Display-Name").value_or(request.name)};
+  }
+
+  Reply parameterized(const int id, const bool notify,
+                      fw::HttpContext& context) {
+    return Reply{id, notify ? context.path() : "quiet"};
+  }
+};
+}  // namespace
+
+TEST(HttpResultTest, AppliesStatusJsonBodyAndCustomHeaders) {
   http::request<http::string_body> request;
   http::response<http::string_body> response;
   auto context = make_context(request, response);
@@ -165,8 +159,7 @@ TEST(HttpResultTest, AppliesStatusJsonBodyAndCustomHeaders)
   EXPECT_EQ(response.body(), R"({"id":7,"name":"Ada"})");
 }
 
-TEST(HttpResultTest, WrapsBareResponseAsJsonOk)
-{
+TEST(HttpResultTest, WrapsBareResponseAsJsonOk) {
   http::request<http::string_body> request;
   http::response<http::string_body> response;
   auto context = make_context(request, response);
@@ -178,8 +171,7 @@ TEST(HttpResultTest, WrapsBareResponseAsJsonOk)
   EXPECT_EQ(response.body(), R"({"id":8,"name":"Grace"})");
 }
 
-TEST(HttpResultTest, SupportsEmptyNoContentResponse)
-{
+TEST(HttpResultTest, SupportsEmptyNoContentResponse) {
   http::request<http::string_body> request;
   http::response<http::string_body> response;
   auto context = make_context(request, response);
@@ -194,49 +186,54 @@ TEST(HttpResultTest, SupportsEmptyNoContentResponse)
   EXPECT_EQ(response.find(http::field::content_type), response.end());
 }
 
-TEST(HttpResultSecurityTest, RejectsHeaderInjectionAndInvalidNames)
-{
+TEST(HttpResultSecurityTest, RejectsHeaderInjectionAndInvalidNames) {
   fw::HttpResult<Reply> result(http::status::ok, Reply{1, "test"});
 
-  EXPECT_THROW(result.header("X-Test\r\nInjected", "value"), std::invalid_argument);
+  EXPECT_THROW(result.header("X-Test\r\nInjected", "value"),
+               std::invalid_argument);
   EXPECT_THROW(result.header("X Test", "value"), std::invalid_argument);
-  EXPECT_THROW(result.header("X-Test", "value\r\nInjected: yes"), std::invalid_argument);
-  EXPECT_THROW(result.header("X-Test", std::string("ok\0bad", 6)), std::invalid_argument);
-  EXPECT_THROW(result.header("X-Test", std::string("ok\x01", 3)), std::invalid_argument);
-  EXPECT_THROW(result.header("X-Test", std::string("ok\x7f", 3)), std::invalid_argument);
+  EXPECT_THROW(result.header("X-Test", "value\r\nInjected: yes"),
+               std::invalid_argument);
+  EXPECT_THROW(result.header("X-Test", std::string("ok\0bad", 6)),
+               std::invalid_argument);
+  EXPECT_THROW(result.header("X-Test", std::string("ok\x01", 3)),
+               std::invalid_argument);
+  EXPECT_THROW(result.header("X-Test", std::string("ok\x7f", 3)),
+               std::invalid_argument);
 }
 
-TEST(HttpResultSecurityTest, RejectsApplicationControlledFramingHeaders)
-{
+TEST(HttpResultSecurityTest, RejectsApplicationControlledFramingHeaders) {
   fw::HttpResult<Reply> result(http::status::ok, Reply{1, "test"});
 
   EXPECT_THROW(result.header("Content-Length", "1"), std::invalid_argument);
   EXPECT_THROW(result.header("content-length", "1"), std::invalid_argument);
-  EXPECT_THROW(result.header("Transfer-Encoding", "chunked"), std::invalid_argument);
-  EXPECT_THROW(result.header("Connection", "keep-alive"), std::invalid_argument);
-  EXPECT_THROW(result.header("Keep-Alive", "timeout=10"), std::invalid_argument);
+  EXPECT_THROW(result.header("Transfer-Encoding", "chunked"),
+               std::invalid_argument);
+  EXPECT_THROW(result.header("Connection", "keep-alive"),
+               std::invalid_argument);
+  EXPECT_THROW(result.header("Keep-Alive", "timeout=10"),
+               std::invalid_argument);
   EXPECT_THROW(result.header("Upgrade", "websocket"), std::invalid_argument);
   EXPECT_THROW(result.header("Trailer", "X-Checksum"), std::invalid_argument);
 }
 
-TEST(HttpResultSecurityTest, AcceptsOrdinaryResponseHeaders)
-{
+TEST(HttpResultSecurityTest, AcceptsOrdinaryResponseHeaders) {
   fw::HttpResult<Reply> result(http::status::ok, Reply{1, "test"});
 
-  EXPECT_NO_THROW(result.header("Location", "/safe").header("X-Correlation-Id", "abc-123"));
+  EXPECT_NO_THROW(
+      result.header("Location", "/safe").header("X-Correlation-Id", "abc-123"));
   ASSERT_EQ(result.headers().size(), 2U);
   EXPECT_EQ(result.headers()[0].name, "Location");
   EXPECT_EQ(result.headers()[1].value, "abc-123");
 }
 
-TEST(TypedRouteTest, ConvertsJsonAndAppliesHttpResult)
-{
+TEST(TypedRouteTest, ConvertsJsonAndAppliesHttpResult) {
   fw::HttpRouter router;
   int calls = 0;
-  router.post("/users", [&calls](const CreateRequest& request)
-  {
+  router.post("/users", [&calls](const CreateRequest& request) {
     ++calls;
-    auto result = fw::HttpResult<Reply>::created(Reply{request.age, request.name});
+    auto result =
+        fw::HttpResult<Reply>::created(Reply{request.age, request.name});
     return result.header("Location", "/users/42");
   });
 
@@ -251,20 +248,21 @@ TEST(TypedRouteTest, ConvertsJsonAndAppliesHttpResult)
   EXPECT_EQ(response.body(), R"({"id":42,"name":"Ada"})");
 }
 
-TEST(TypedRouteTest, BindsPathBodyAndQueryDescriptorsWithContext)
-{
+TEST(TypedRouteTest, BindsPathBodyAndQueryDescriptorsWithContext) {
   fw::HttpRouter router;
-  router.put("/users/{id}",
-    [](const int id, const CreateRequest& request, const bool notify, fw::HttpContext& context)
-    {
-      const auto suffix = notify ? ":notify" : ":quiet";
-      return Reply{id, request.name + suffix + context.get_header("X-Trace").value_or("")};
-    },
-    fw::PathParam<int>{"id"},
-    fw::Body<CreateRequest>{},
-    fw::QueryParam<bool>{"notify"});
+  router.put(
+      "/users/{id}",
+      [](const int id, const CreateRequest& request, const bool notify,
+         fw::HttpContext& context) {
+        const auto suffix = notify ? ":notify" : ":quiet";
+        return Reply{id, request.name + suffix +
+                             context.get_header("X-Trace").value_or("")};
+      },
+      fw::PathParam<int>{"id"}, fw::Body<CreateRequest>{},
+      fw::QueryParam<bool>{"notify"});
 
-  auto request = json_request("/users/42?notify=true", R"({"name":"Ada","age":20})");
+  auto request =
+      json_request("/users/42?notify=true", R"({"name":"Ada","age":20})");
   request.method(http::verb::put);
   request.set("X-Trace", ":trace");
   http::response<http::string_body> response;
@@ -275,16 +273,15 @@ TEST(TypedRouteTest, BindsPathBodyAndQueryDescriptorsWithContext)
   EXPECT_EQ(response.body(), R"({"id":42,"name":"Ada:notify:trace"})");
 }
 
-TEST(TypedRouteTest, SupportsDefaultedAndOptionalQueryDescriptorsWithoutBody)
-{
+TEST(TypedRouteTest, SupportsDefaultedAndOptionalQueryDescriptorsWithoutBody) {
   fw::HttpRouter router;
-  router.get("/users",
-    [](const int page, const std::optional<std::string>& keyword)
-    {
-      return Reply{page, keyword.value_or("all")};
-    },
-    fw::QueryParam<int>{"page", 1},
-    fw::QueryParam<std::optional<std::string>>{"keyword"});
+  router.get(
+      "/users",
+      [](const int page, const std::optional<std::string>& keyword) {
+        return Reply{page, keyword.value_or("all")};
+      },
+      fw::QueryParam<int>{"page", 1},
+      fw::QueryParam<std::optional<std::string>>{"keyword"});
 
   {
     http::request<http::string_body> request(http::verb::get, "/users", 11);
@@ -295,7 +292,8 @@ TEST(TypedRouteTest, SupportsDefaultedAndOptionalQueryDescriptorsWithoutBody)
   }
 
   {
-    http::request<http::string_body> request(http::verb::get, "/users?page=3&keyword=Ada", 11);
+    http::request<http::string_body> request(http::verb::get,
+                                             "/users?page=3&keyword=Ada", 11);
     http::response<http::string_body> response;
     auto context = make_context(request, response);
     EXPECT_TRUE(router.dispatch(context));
@@ -303,20 +301,19 @@ TEST(TypedRouteTest, SupportsDefaultedAndOptionalQueryDescriptorsWithoutBody)
   }
 }
 
-TEST(TypedRouteTest, StrictlyConvertsSupportedScalarDescriptors)
-{
+TEST(TypedRouteTest, StrictlyConvertsSupportedScalarDescriptors) {
   fw::HttpRouter router;
-  router.get("/metrics/{scope}",
-    [](const std::string& scope, const double ratio, const bool enabled)
-    {
-      return Reply{static_cast<int>(ratio * 10), scope + (enabled ? ":on" : ":off")};
-    },
-    fw::PathParam<std::string>{"scope"},
-    fw::QueryParam<double>{"ratio"},
-    fw::QueryParam<bool>{"enabled"});
+  router.get(
+      "/metrics/{scope}",
+      [](const std::string& scope, const double ratio, const bool enabled) {
+        return Reply{static_cast<int>(ratio * 10),
+                     scope + (enabled ? ":on" : ":off")};
+      },
+      fw::PathParam<std::string>{"scope"}, fw::QueryParam<double>{"ratio"},
+      fw::QueryParam<bool>{"enabled"});
 
   http::request<http::string_body> request(
-    http::verb::get, "/metrics/search?ratio=1.25&enabled=true", 11);
+      http::verb::get, "/metrics/search?ratio=1.25&enabled=true", 11);
   http::response<http::string_body> response;
   auto context = make_context(request, response);
 
@@ -324,117 +321,115 @@ TEST(TypedRouteTest, StrictlyConvertsSupportedScalarDescriptors)
   EXPECT_EQ(response.body(), R"({"id":12,"name":"search:on"})");
 }
 
-TEST(TypedRouteTest, InvalidDescriptorValuesReturnStableBadRequestWithoutCallingHandler)
-{
-  struct Case
-  {
+TEST(TypedRouteTest,
+     InvalidDescriptorValuesReturnStableBadRequestWithoutCallingHandler) {
+  struct Case {
     const char* target;
     const char* message;
   };
   const Case cases[] = {
-    {"/users", "Missing query parameter 'page'"},
-    {"/users?page=3x", "Invalid query parameter 'page'"},
+      {"/users", "Missing query parameter 'page'"},
+      {"/users?page=3x", "Invalid query parameter 'page'"},
   };
 
-  for (const auto& test_case : cases)
-  {
+  for (const auto& test_case : cases) {
     fw::HttpRouter router;
     int calls = 0;
-    router.get("/users", [&calls](const int page)
-    {
-      ++calls;
-      return Reply{page, "called"};
-    }, fw::QueryParam<int>{"page"});
+    router.get(
+        "/users",
+        [&calls](const int page) {
+          ++calls;
+          return Reply{page, "called"};
+        },
+        fw::QueryParam<int>{"page"});
 
-    http::request<http::string_body> request(http::verb::get, test_case.target, 11);
+    http::request<http::string_body> request(http::verb::get, test_case.target,
+                                             11);
     http::response<http::string_body> response;
     auto context = make_context(request, response);
     EXPECT_TRUE(router.dispatch(context));
     EXPECT_EQ(calls, 0);
     EXPECT_EQ(response.result(), http::status::bad_request);
     EXPECT_EQ(response[http::field::content_type], "application/json");
-    EXPECT_EQ(response.body(), std::string(R"({"code":"INVALID_REQUEST_PARAMETER","message":")") +
-                               test_case.message + R"("})");
+    EXPECT_EQ(
+        response.body(),
+        std::string(R"({"code":"INVALID_REQUEST_PARAMETER","message":")") +
+            test_case.message + R"("})");
   }
 }
 
-TEST(TypedRouteTest, MapsInvalidDescriptorValuesThroughTheExceptionPipeline)
-{
+TEST(TypedRouteTest, MapsInvalidDescriptorValuesThroughTheExceptionPipeline) {
   fw::HttpRouter router;
   int calls = 0;
   router.map_exception<fw::TypedParameterValidationError>(
-    [](const fw::TypedParameterValidationError& error)
-    {
-      return fw::HttpResult<ErrorReply>(
-        http::status::unprocessable_entity,
-        ErrorReply{"AUTH_INVALID_PARAMETER", error.what()});
-    });
-  router.get("/users", [&calls](const int page)
-  {
-    ++calls;
-    return Reply{page, "called"};
-  }, fw::QueryParam<int>{"page"});
+      [](const fw::TypedParameterValidationError& error) {
+        return fw::HttpResult<ErrorReply>(
+            http::status::unprocessable_entity,
+            ErrorReply{"AUTH_INVALID_PARAMETER", error.what()});
+      });
+  router.get(
+      "/users",
+      [&calls](const int page) {
+        ++calls;
+        return Reply{page, "called"};
+      },
+      fw::QueryParam<int>{"page"});
 
-  http::request<http::string_body> request(http::verb::get, "/users?page=invalid", 11);
+  http::request<http::string_body> request(http::verb::get,
+                                           "/users?page=invalid", 11);
   http::response<http::string_body> response;
   auto context = make_context(request, response);
 
   EXPECT_TRUE(router.dispatch(context));
   EXPECT_EQ(calls, 0);
   EXPECT_EQ(response.result(), http::status::unprocessable_entity);
-  EXPECT_EQ(response.body(),
-            R"({"code":"AUTH_INVALID_PARAMETER","message":"Invalid query parameter 'page'"})");
+  EXPECT_EQ(
+      response.body(),
+      R"({"code":"AUTH_INVALID_PARAMETER","message":"Invalid query parameter 'page'"})");
 }
 
-TEST(TypedRouteTest, RejectsInvalidDescriptorDeclarationsAtRegistration)
-{
+TEST(TypedRouteTest, RejectsInvalidDescriptorDeclarationsAtRegistration) {
   fw::HttpRouter router;
-  const auto one_argument = [](const int value)
-  {
-    return Reply{value, "one"};
-  };
-  const auto two_arguments = [](const int first, const int second)
-  {
+  const auto one_argument = [](const int value) { return Reply{value, "one"}; };
+  const auto two_arguments = [](const int first, const int second) {
     return Reply{first + second, "two"};
   };
 
-  EXPECT_THROW(router.get("/users/{id}", one_argument, fw::PathParam<int>{"other"}),
-               std::invalid_argument);
+  EXPECT_THROW(
+      router.get("/users/{id}", one_argument, fw::PathParam<int>{"other"}),
+      std::invalid_argument);
   EXPECT_THROW(router.get("/users", one_argument, fw::QueryParam<int>{""}),
                std::invalid_argument);
-  EXPECT_THROW(router.get("/users", two_arguments,
-                          fw::QueryParam<int>{"page"}, fw::QueryParam<int>{"page"}),
+  EXPECT_THROW(router.get("/users", two_arguments, fw::QueryParam<int>{"page"},
+                          fw::QueryParam<int>{"page"}),
                std::invalid_argument);
 }
 
-TEST(TypedRouteTest, InvalidBodiesReturnStableBadRequestWithoutCallingHandler)
-{
+TEST(TypedRouteTest, InvalidBodiesReturnStableBadRequestWithoutCallingHandler) {
   const std::string expected =
-    R"({"code":"INVALID_REQUEST_BODY","message":"Request body must be valid JSON matching the expected schema"})";
+      R"({"code":"INVALID_REQUEST_BODY","message":"Request body must be valid JSON matching the expected schema"})";
 
-  struct Case
-  {
+  struct Case {
     const char* body;
     bool json_content_type;
   };
   const Case cases[] = {
-    {R"({"name":"Ada","age":42})", false},
-    {R"({"name":)", true},
-    {R"({"name":"Ada","age":"old"})", true},
+      {R"({"name":"Ada","age":42})", false},
+      {R"({"name":)", true},
+      {R"({"name":"Ada","age":"old"})", true},
   };
 
-  for (const auto& test_case : cases)
-  {
+  for (const auto& test_case : cases) {
     fw::HttpRouter router;
     int calls = 0;
-    router.post("/users", [&calls](const CreateRequest& request)
-    {
+    router.post("/users", [&calls](const CreateRequest& request) {
       ++calls;
       return Reply{request.age, request.name};
     });
 
     http::request<http::string_body> request(http::verb::post, "/users", 11);
-    if (test_case.json_content_type) request.set(http::field::content_type, "application/json");
+    if (test_case.json_content_type)
+      request.set(http::field::content_type, "application/json");
     request.body() = test_case.body;
     request.prepare_payload();
     http::response<http::string_body> response;
@@ -448,18 +443,16 @@ TEST(TypedRouteTest, InvalidBodiesReturnStableBadRequestWithoutCallingHandler)
   }
 }
 
-TEST(TypedRouteTest, MapsInvalidRequestBodiesThroughTheExceptionPipeline)
-{
+TEST(TypedRouteTest, MapsInvalidRequestBodiesThroughTheExceptionPipeline) {
   fw::HttpRouter router;
   int calls = 0;
-  router.map_exception<fw::TypedRequestValidationError>([](const fw::TypedRequestValidationError& error)
-  {
-    return fw::HttpResult<ErrorReply>(
-      http::status::bad_request,
-      ErrorReply{"AUTH_INVALID_REQUEST", error.what()});
-  });
-  router.post("/users", [&calls](const CreateRequest& request)
-  {
+  router.map_exception<fw::TypedRequestValidationError>(
+      [](const fw::TypedRequestValidationError& error) {
+        return fw::HttpResult<ErrorReply>(
+            http::status::bad_request,
+            ErrorReply{"AUTH_INVALID_REQUEST", error.what()});
+      });
+  router.post("/users", [&calls](const CreateRequest& request) {
     ++calls;
     return Reply{request.age, request.name};
   });
@@ -471,16 +464,15 @@ TEST(TypedRouteTest, MapsInvalidRequestBodiesThroughTheExceptionPipeline)
   EXPECT_TRUE(router.dispatch(context));
   EXPECT_EQ(calls, 0);
   EXPECT_EQ(response.result(), http::status::bad_request);
-  EXPECT_EQ(response.body(),
-            R"({"code":"AUTH_INVALID_REQUEST","message":"Request body must be valid JSON matching the expected schema"})");
+  EXPECT_EQ(
+      response.body(),
+      R"({"code":"AUTH_INVALID_REQUEST","message":"Request body must be valid JSON matching the expected schema"})");
 }
 
-TEST(TypedRouteSecurityTest, RejectsMisleadingJsonMediaType)
-{
+TEST(TypedRouteSecurityTest, RejectsMisleadingJsonMediaType) {
   fw::HttpRouter router;
   int calls = 0;
-  router.post("/users", [&calls](const CreateRequest& request)
-  {
+  router.post("/users", [&calls](const CreateRequest& request) {
     ++calls;
     return Reply{request.age, request.name};
   });
@@ -493,15 +485,14 @@ TEST(TypedRouteSecurityTest, RejectsMisleadingJsonMediaType)
   EXPECT_TRUE(router.dispatch(context));
   EXPECT_EQ(calls, 0);
   EXPECT_EQ(response.result(), http::status::bad_request);
-  EXPECT_EQ(response.body(),
-            R"({"code":"INVALID_REQUEST_BODY","message":"Request body must be valid JSON matching the expected schema"})");
+  EXPECT_EQ(
+      response.body(),
+      R"({"code":"INVALID_REQUEST_BODY","message":"Request body must be valid JSON matching the expected schema"})");
 }
 
-TEST(TypedRouteTest, AcceptsJsonMediaTypeParameters)
-{
+TEST(TypedRouteTest, AcceptsJsonMediaTypeParameters) {
   fw::HttpRouter router;
-  router.post("/users", [](const CreateRequest& request)
-  {
+  router.post("/users", [](const CreateRequest& request) {
     return Reply{request.age, request.name};
   });
 
@@ -515,11 +506,9 @@ TEST(TypedRouteTest, AcceptsJsonMediaTypeParameters)
   EXPECT_EQ(response.body(), R"({"id":42,"name":"Ada"})");
 }
 
-TEST(TypedRouteTest, SupportsBoostDescribeDtoWithoutCustomJsonConverters)
-{
+TEST(TypedRouteTest, SupportsBoostDescribeDtoWithoutCustomJsonConverters) {
   fw::HttpRouter router;
-  router.post("/described", [](const DescribedPayload& request)
-  {
+  router.post("/described", [](const DescribedPayload& request) {
     return DescribedPayload{request.value + 1};
   });
 
@@ -532,84 +521,84 @@ TEST(TypedRouteTest, SupportsBoostDescribeDtoWithoutCustomJsonConverters)
   EXPECT_EQ(response.body(), R"({"value":42})");
 }
 
-TEST(TypedRouteTest, SupportsStdFunctionAndEveryBufferedVerb)
-{
+TEST(TypedRouteTest, SupportsStdFunctionAndEveryBufferedVerb) {
   fw::HttpRouter router;
-  std::function<Reply(const CreateRequest&)> get_handler = [](const CreateRequest& request)
-  {
-    return Reply{request.age, "get:" + request.name};
-  };
+  std::function<Reply(const CreateRequest&)> get_handler =
+      [](const CreateRequest& request) {
+        return Reply{request.age, "get:" + request.name};
+      };
   router.get("/typed-get", std::move(get_handler));
-  router.post("/typed-post", [](const CreateRequest& request) { return Reply{request.age, "post:" + request.name}; });
-  router.put("/typed-put", [](const CreateRequest& request) { return Reply{request.age, "put:" + request.name}; });
-  router.del("/typed-delete", [](const CreateRequest& request) { return Reply{request.age, "delete:" + request.name}; });
-  router.options("/typed-options", [](const CreateRequest& request) { return Reply{request.age, "options:" + request.name}; });
+  router.post("/typed-post", [](const CreateRequest& request) {
+    return Reply{request.age, "post:" + request.name};
+  });
+  router.put("/typed-put", [](const CreateRequest& request) {
+    return Reply{request.age, "put:" + request.name};
+  });
+  router.del("/typed-delete", [](const CreateRequest& request) {
+    return Reply{request.age, "delete:" + request.name};
+  });
+  router.options("/typed-options", [](const CreateRequest& request) {
+    return Reply{request.age, "options:" + request.name};
+  });
 
-  struct Case
-  {
+  struct Case {
     http::verb verb;
     const char* path;
     const char* expected_name;
   };
   const Case cases[] = {
-    {http::verb::get, "/typed-get", "get:Ada"},
-    {http::verb::post, "/typed-post", "post:Ada"},
-    {http::verb::put, "/typed-put", "put:Ada"},
-    {http::verb::delete_, "/typed-delete", "delete:Ada"},
-    {http::verb::options, "/typed-options", "options:Ada"},
+      {http::verb::get, "/typed-get", "get:Ada"},
+      {http::verb::post, "/typed-post", "post:Ada"},
+      {http::verb::put, "/typed-put", "put:Ada"},
+      {http::verb::delete_, "/typed-delete", "delete:Ada"},
+      {http::verb::options, "/typed-options", "options:Ada"},
   };
 
-  for (const auto& test_case : cases)
-  {
+  for (const auto& test_case : cases) {
     auto request = json_request(test_case.path, R"({"name":"Ada","age":42})");
     request.method(test_case.verb);
     http::response<http::string_body> response;
     auto context = make_context(request, response);
     EXPECT_TRUE(router.dispatch(context));
     EXPECT_EQ(response.result(), http::status::ok);
-    EXPECT_EQ(response.body(),
-              std::string(R"({"id":42,"name":")") + test_case.expected_name + R"("})");
+    EXPECT_EQ(response.body(), std::string(R"({"id":42,"name":")") +
+                                   test_case.expected_name + R"("})");
   }
 }
 
-TEST(TypedRouteTest, SupportsDescriptorsForEveryBufferedVerb)
-{
+TEST(TypedRouteTest, SupportsDescriptorsForEveryBufferedVerb) {
   fw::HttpRouter router;
-  const auto handler = [](const int value)
-  {
-    return Reply{value, "bound"};
-  };
+  const auto handler = [](const int value) { return Reply{value, "bound"}; };
   router.get("/descriptor-get", handler, fw::QueryParam<int>{"value"});
   router.post("/descriptor-post", handler, fw::QueryParam<int>{"value"});
   router.put("/descriptor-put", handler, fw::QueryParam<int>{"value"});
   router.del("/descriptor-delete", handler, fw::QueryParam<int>{"value"});
   router.options("/descriptor-options", handler, fw::QueryParam<int>{"value"});
 
-  const struct
-  {
+  const struct {
     http::verb verb;
     const char* path;
   } cases[] = {
-    {http::verb::get, "/descriptor-get?value=1"},
-    {http::verb::post, "/descriptor-post?value=2"},
-    {http::verb::put, "/descriptor-put?value=3"},
-    {http::verb::delete_, "/descriptor-delete?value=4"},
-    {http::verb::options, "/descriptor-options?value=5"},
+      {http::verb::get, "/descriptor-get?value=1"},
+      {http::verb::post, "/descriptor-post?value=2"},
+      {http::verb::put, "/descriptor-put?value=3"},
+      {http::verb::delete_, "/descriptor-delete?value=4"},
+      {http::verb::options, "/descriptor-options?value=5"},
   };
 
-  for (std::size_t index = 0; index < std::size(cases); ++index)
-  {
-    http::request<http::string_body> request(cases[index].verb, cases[index].path, 11);
+  for (std::size_t index = 0; index < std::size(cases); ++index) {
+    http::request<http::string_body> request(cases[index].verb,
+                                             cases[index].path, 11);
     http::response<http::string_body> response;
     auto context = make_context(request, response);
     EXPECT_TRUE(router.dispatch(context));
-    EXPECT_EQ(response.body(), std::string(R"({"id":)") + std::to_string(index + 1) +
-                               R"(,"name":"bound"})");
+    EXPECT_EQ(response.body(), std::string(R"({"id":)") +
+                                   std::to_string(index + 1) +
+                                   R"(,"name":"bound"})");
   }
 }
 
-TEST(TypedRouteTest, SupportsControllerMembersConstMembersAndContextInjection)
-{
+TEST(TypedRouteTest, SupportsControllerMembersConstMembersAndContextInjection) {
   fw::HttpRouter router;
   auto controller = std::make_shared<TypedController>();
   std::weak_ptr<TypedController> lifetime = controller;
@@ -627,7 +616,8 @@ TEST(TypedRouteTest, SupportsControllerMembersConstMembersAndContextInjection)
   }
 
   {
-    auto request = json_request("/const-member", R"({"name":"Grace","age":10})");
+    auto request =
+        json_request("/const-member", R"({"name":"Grace","age":10})");
     http::response<http::string_body> response;
     auto context = make_context(request, response);
     EXPECT_TRUE(router.dispatch(context));
@@ -636,7 +626,8 @@ TEST(TypedRouteTest, SupportsControllerMembersConstMembersAndContextInjection)
   }
 
   {
-    auto request = json_request("/with-context", R"({"name":"fallback","age":12})");
+    auto request =
+        json_request("/with-context", R"({"name":"fallback","age":12})");
     request.set("X-Display-Name", "Header Name");
     http::response<http::string_body> response;
     auto context = make_context(request, response);
@@ -645,26 +636,26 @@ TEST(TypedRouteTest, SupportsControllerMembersConstMembersAndContextInjection)
   }
 
   {
-    http::request<http::string_body> request(http::verb::put, "/parameterized/17", 11);
+    http::request<http::string_body> request(http::verb::put,
+                                             "/parameterized/17", 11);
     http::response<http::string_body> response;
     auto context = make_context(request, response);
     EXPECT_TRUE(router.dispatch(context));
     EXPECT_EQ(response.body(), R"({"id":17,"name":"quiet"})");
   }
 
-  const struct
-  {
+  const struct {
     http::verb verb;
     const char* path;
   } descriptor_cases[] = {
-    {http::verb::get, "/parameterized-get/18"},
-    {http::verb::post, "/parameterized-post/18"},
-    {http::verb::delete_, "/parameterized-delete/18"},
-    {http::verb::options, "/parameterized-options/18"},
+      {http::verb::get, "/parameterized-get/18"},
+      {http::verb::post, "/parameterized-post/18"},
+      {http::verb::delete_, "/parameterized-delete/18"},
+      {http::verb::options, "/parameterized-options/18"},
   };
-  for (const auto& test_case : descriptor_cases)
-  {
-    http::request<http::string_body> request(test_case.verb, test_case.path, 11);
+  for (const auto& test_case : descriptor_cases) {
+    http::request<http::string_body> request(test_case.verb, test_case.path,
+                                             11);
     http::response<http::string_body> response;
     auto context = make_context(request, response);
     EXPECT_TRUE(router.dispatch(context));
@@ -672,11 +663,9 @@ TEST(TypedRouteTest, SupportsControllerMembersConstMembersAndContextInjection)
   }
 }
 
-TEST(TypedRouteCompatibilityTest, LegacyHttpContextHandlerRemainsUnchanged)
-{
+TEST(TypedRouteCompatibilityTest, LegacyHttpContextHandlerRemainsUnchanged) {
   fw::HttpRouter router;
-  router.post("/legacy", [](fw::HttpContext& context)
-  {
+  router.post("/legacy", [](fw::HttpContext& context) {
     context.set_status(http::status::accepted);
     context.set_content_type("text/plain");
     context.set_body("legacy");
@@ -692,37 +681,37 @@ TEST(TypedRouteCompatibilityTest, LegacyHttpContextHandlerRemainsUnchanged)
   EXPECT_EQ(response.body(), "legacy");
 }
 
-TEST(TypedExceptionTest, MapsRegisteredExceptionToTypedResponse)
-{
+TEST(TypedExceptionTest, MapsRegisteredExceptionToTypedResponse) {
   fw::HttpRouter router;
   int mapper_calls = 0;
-  router.map_exception<ValidationError>([&mapper_calls](const ValidationError& error)
-  {
-    ++mapper_calls;
-    fw::HttpResult<ErrorReply> result(
-      http::status::unprocessable_entity,
-      ErrorReply{"VALIDATION_FAILED", error.what()});
-    return result.header("X-Error-Source", "validation");
-  });
+  router.map_exception<ValidationError>(
+      [&mapper_calls](const ValidationError& error) {
+        ++mapper_calls;
+        fw::HttpResult<ErrorReply> result(
+            http::status::unprocessable_entity,
+            ErrorReply{"VALIDATION_FAILED", error.what()});
+        return result.header("X-Error-Source", "validation");
+      });
 
   http::request<http::string_body> request;
   http::response<http::string_body> response;
   auto context = make_context(request, response);
-  router.handle_exception(std::make_exception_ptr(ValidationError("age is invalid")), context);
+  router.handle_exception(
+      std::make_exception_ptr(ValidationError("age is invalid")), context);
 
   EXPECT_EQ(mapper_calls, 1);
   EXPECT_EQ(response.result(), http::status::unprocessable_entity);
   EXPECT_EQ(response["X-Error-Source"], "validation");
-  EXPECT_EQ(response.body(), R"({"code":"VALIDATION_FAILED","message":"age is invalid"})");
+  EXPECT_EQ(response.body(),
+            R"({"code":"VALIDATION_FAILED","message":"age is invalid"})");
 }
 
-TEST(TypedExceptionTest, SerializesHttpExceptionBodyStatusAndHeaders)
-{
+TEST(TypedExceptionTest, SerializesHttpExceptionBodyStatusAndHeaders) {
   fw::HttpRouter router;
   fw::HttpException exception(
-    http::status::conflict,
-    ErrorReply{"VERSION_CONFLICT", "resource was updated"},
-    "optimistic lock conflict for internal record 99");
+      http::status::conflict,
+      ErrorReply{"VERSION_CONFLICT", "resource was updated"},
+      "optimistic lock conflict for internal record 99");
   exception.header("Retry-After", "1");
 
   http::request<http::string_body> request;
@@ -732,30 +721,33 @@ TEST(TypedExceptionTest, SerializesHttpExceptionBodyStatusAndHeaders)
 
   EXPECT_EQ(response.result(), http::status::conflict);
   EXPECT_EQ(response[http::field::retry_after], "1");
-  EXPECT_EQ(response.body(), R"({"code":"VERSION_CONFLICT","message":"resource was updated"})");
+  EXPECT_EQ(response.body(),
+            R"({"code":"VERSION_CONFLICT","message":"resource was updated"})");
   EXPECT_EQ(response.body().find("internal record 99"), std::string::npos);
 }
 
-TEST(TypedExceptionSecurityTest, UnknownStdExceptionDoesNotLeakDetails)
-{
+TEST(TypedExceptionSecurityTest, UnknownStdExceptionDoesNotLeakDetails) {
   fw::HttpRouter router;
   http::request<http::string_body> request;
   http::response<http::string_body> response;
   auto context = make_context(request, response);
 
-  router.handle_exception(
-    std::make_exception_ptr(std::runtime_error("database password=secret at 10.0.0.4")), context);
+  router.handle_exception(std::make_exception_ptr(std::runtime_error(
+                              "database password=secret at 10.0.0.4")),
+                          context);
 
   EXPECT_EQ(response.result(), http::status::internal_server_error);
   EXPECT_EQ(response[http::field::content_type], "application/json");
-  EXPECT_EQ(response.body(), R"({"code":"INTERNAL_SERVER_ERROR","message":"Internal server error"})");
+  EXPECT_EQ(
+      response.body(),
+      R"({"code":"INTERNAL_SERVER_ERROR","message":"Internal server error"})");
   EXPECT_EQ(response.body().find("database"), std::string::npos);
   EXPECT_EQ(response.body().find("password"), std::string::npos);
   EXPECT_EQ(response.body().find("secret"), std::string::npos);
 }
 
-TEST(TypedExceptionSecurityTest, ExceptionResponseClearsPartiallyWrittenSensitiveState)
-{
+TEST(TypedExceptionSecurityTest,
+     ExceptionResponseClearsPartiallyWrittenSensitiveState) {
   fw::HttpRouter router;
   http::request<http::string_body> request;
   http::response<http::string_body> response;
@@ -764,15 +756,18 @@ TEST(TypedExceptionSecurityTest, ExceptionResponseClearsPartiallyWrittenSensitiv
   context.set_header("X-Internal-Secret", "sensitive");
   context.set_body("partial secret response");
 
-  router.handle_exception(std::make_exception_ptr(std::runtime_error("failed")), context);
+  router.handle_exception(std::make_exception_ptr(std::runtime_error("failed")),
+                          context);
 
   EXPECT_EQ(response.result(), http::status::internal_server_error);
   EXPECT_EQ(response.find("X-Internal-Secret"), response.end());
-  EXPECT_EQ(response.body(), R"({"code":"INTERNAL_SERVER_ERROR","message":"Internal server error"})");
+  EXPECT_EQ(
+      response.body(),
+      R"({"code":"INTERNAL_SERVER_ERROR","message":"Internal server error"})");
 }
 
-TEST(TypedExceptionSecurityTest, NullExceptionPointerAlsoClearsPartialResponse)
-{
+TEST(TypedExceptionSecurityTest,
+     NullExceptionPointerAlsoClearsPartialResponse) {
   fw::HttpRouter router;
   http::request<http::string_body> request;
   http::response<http::string_body> response;
@@ -784,33 +779,38 @@ TEST(TypedExceptionSecurityTest, NullExceptionPointerAlsoClearsPartialResponse)
 
   EXPECT_EQ(response.result(), http::status::internal_server_error);
   EXPECT_EQ(response.find("X-Internal-Secret"), response.end());
-  EXPECT_EQ(response.body(), R"({"code":"INTERNAL_SERVER_ERROR","message":"Internal server error"})");
+  EXPECT_EQ(
+      response.body(),
+      R"({"code":"INTERNAL_SERVER_ERROR","message":"Internal server error"})");
 }
 
-TEST(TypedExceptionSecurityTest, MapperFailureFallsBackToSafeInternalServerError)
-{
+TEST(TypedExceptionSecurityTest,
+     MapperFailureFallsBackToSafeInternalServerError) {
   fw::HttpRouter router;
-  router.map_exception<ValidationError>([](const ValidationError&) -> ErrorReply
-  {
-    throw std::runtime_error("mapper secret");
-  });
+  router.map_exception<ValidationError>(
+      [](const ValidationError&) -> ErrorReply {
+        throw std::runtime_error("mapper secret");
+      });
 
   http::request<http::string_body> request;
   http::response<http::string_body> response;
   auto context = make_context(request, response);
 
-  EXPECT_NO_THROW(router.handle_exception(std::make_exception_ptr(ValidationError("invalid")), context));
+  EXPECT_NO_THROW(router.handle_exception(
+      std::make_exception_ptr(ValidationError("invalid")), context));
   EXPECT_EQ(response.result(), http::status::internal_server_error);
-  EXPECT_EQ(response.body(), R"({"code":"INTERNAL_SERVER_ERROR","message":"Internal server error"})");
+  EXPECT_EQ(
+      response.body(),
+      R"({"code":"INTERNAL_SERVER_ERROR","message":"Internal server error"})");
   EXPECT_EQ(response.body().find("mapper secret"), std::string::npos);
 }
 
-TEST(TypedExceptionSecurityTest, HttpExceptionRejectsInjectedHeaders)
-{
-  fw::HttpException exception(
-    http::status::bad_request,
-    ErrorReply{"BAD_REQUEST", "invalid"});
+TEST(TypedExceptionSecurityTest, HttpExceptionRejectsInjectedHeaders) {
+  fw::HttpException exception(http::status::bad_request,
+                              ErrorReply{"BAD_REQUEST", "invalid"});
 
-  EXPECT_THROW(exception.header("X-Test", "safe\r\nInjected: yes"), std::invalid_argument);
-  EXPECT_THROW(exception.header("Content-Length", "999"), std::invalid_argument);
+  EXPECT_THROW(exception.header("X-Test", "safe\r\nInjected: yes"),
+               std::invalid_argument);
+  EXPECT_THROW(exception.header("Content-Length", "999"),
+               std::invalid_argument);
 }
