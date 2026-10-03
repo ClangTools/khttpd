@@ -327,6 +327,10 @@ HttpClient::UrlParts HttpClient::parse_target(
     const std::string& path_in,
     const std::map<std::string, std::string>& query) {
   boost::urls::url u;
+  const auto query_at = path_in.find('?');
+  const auto fragment_at = path_in.find('#');
+  const auto path_end = std::min(query_at, fragment_at);
+  const auto path_only = path_in.substr(0, path_end);
 
   // Use host pool if available (multi-host), otherwise use single base_url_
   if (host_pool_) {
@@ -338,25 +342,36 @@ HttpClient::UrlParts HttpClient::parse_target(
       auto fallback = boost::urls::parse_uri("http://" + host_url);
       if (fallback.has_value()) u = fallback.value();
     }
-    if (!path_in.empty()) {
-      if (path_in.front() != '/')
-        u.set_path(u.path() + "/" + path_in);
+    if (!path_only.empty()) {
+      if (path_only.front() != '/')
+        u.set_path(u.path() + "/" + path_only);
       else
-        u.set_path(path_in);
+        u.set_path(path_only);
     }
   } else if (base_url_.has_value()) {
     u = base_url_.value();
-    if (!path_in.empty()) {
-      if (path_in.front() != '/')
-        u.set_path(u.path() + "/" + path_in);
+    if (!path_only.empty()) {
+      if (path_only.front() != '/')
+        u.set_path(u.path() + "/" + path_only);
       else
-        u.set_path(path_in);
+        u.set_path(path_only);
     }
   }
 
   auto parse_res = boost::urls::parse_uri(path_in);
   if (parse_res.has_value()) {
     u = parse_res.value();
+  } else if (!path_in.empty()) {
+    // Backward-compatible support for callers that pass a relative target
+    // such as "/health?verbose=1" in the path argument. Keep the path and
+    // query components separate so the query marker is never percent-encoded
+    // into the request path.
+    if (auto relative = boost::urls::parse_relative_ref(path_in);
+        relative.has_value()) {
+      u.params().clear();
+      for (const auto& parameter : relative->params())
+        u.params().append({parameter.key, parameter.value});
+    }
   }
 
   for (const auto& [k, v] : query) {

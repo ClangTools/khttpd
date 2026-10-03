@@ -328,6 +328,18 @@ TEST_F(ClientTest, GetWithQueryParams) {
   WAIT_FOR_ASYNC(future);
 }
 
+TEST(HttpClientLocalTest, SyncRequestAcceptsQueryInPathForCompatibility) {
+  HttpClient client;
+  client.set_base_url(local_http_echo_server().base_url());
+  client.set_timeout(std::chrono::seconds(5));
+
+  const auto response = client.request_sync(
+      http::verb::get, "/get?foo=legacy&id=7", {}, "", {});
+  ASSERT_EQ(response.result(), http::status::ok);
+  EXPECT_NE(response.body().find("\"foo\":\"legacy\""), std::string::npos);
+  EXPECT_NE(response.body().find("\"id\":\"7\""), std::string::npos);
+}
+
 TEST_F(ClientTest, PostJsonBody) {
   std::promise<void> promise;
   auto future = promise.get_future();
