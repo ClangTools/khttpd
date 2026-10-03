@@ -1,47 +1,48 @@
-#include "framework/context/http_context.hpp"
 #include <gtest/gtest.h>
+
+#include "framework/context/http_context.hpp"
 
 namespace beast = boost::beast;
 namespace http = beast::http;
 namespace khttpd_fw = khttpd::framework;
 
 template <class Body = http::string_body>
-http::request<Body> make_request(
-  http::verb method,
-  const std::string& target,
-  int version = 11,
-  const std::string& body_str = "")
-{
+http::request<Body> make_request(http::verb method, const std::string& target,
+                                 int version = 11,
+                                 const std::string& body_str = "") {
   http::request<Body> req(method, target, version);
-  if (!body_str.empty())
-  {
+  if (!body_str.empty()) {
     req.body() = body_str;
     req.prepare_payload();
   }
   return req;
 }
 
-class MultipartEdgeTest : public ::testing::Test
-{
-};
+class MultipartEdgeTest : public ::testing::Test {};
 
 // Test multiple files uploaded under the same form field name
-TEST_F(MultipartEdgeTest, MultipleFilesInSameField)
-{
+TEST_F(MultipartEdgeTest, MultipleFilesInSameField) {
   std::string boundary = "----------Boundary123";
-  std::string multipart_body =
-    "--" + boundary + "\r\n"
-    "Content-Disposition: form-data; name=\"files\"; filename=\"photo1.jpg\"\r\n"
-    "Content-Type: image/jpeg\r\n\r\n"
-    "IMAGE_DATA_1\r\n"
-    "--" + boundary + "\r\n"
-    "Content-Disposition: form-data; name=\"files\"; filename=\"photo2.png\"\r\n"
-    "Content-Type: image/png\r\n\r\n"
-    "IMAGE_DATA_2\r\n"
-    "--" + boundary + "--\r\n";
+  std::string multipart_body = "--" + boundary +
+                               "\r\n"
+                               "Content-Disposition: form-data; "
+                               "name=\"files\"; filename=\"photo1.jpg\"\r\n"
+                               "Content-Type: image/jpeg\r\n\r\n"
+                               "IMAGE_DATA_1\r\n"
+                               "--" +
+                               boundary +
+                               "\r\n"
+                               "Content-Disposition: form-data; "
+                               "name=\"files\"; filename=\"photo2.png\"\r\n"
+                               "Content-Type: image/png\r\n\r\n"
+                               "IMAGE_DATA_2\r\n"
+                               "--" +
+                               boundary + "--\r\n";
 
-  http::request<http::string_body> req = make_request(http::verb::post, "/upload", 11, multipart_body);
-  req.set(http::field::content_type, "multipart/form-data; boundary=" + boundary);
+  http::request<http::string_body> req =
+      make_request(http::verb::post, "/upload", 11, multipart_body);
+  req.set(http::field::content_type,
+          "multipart/form-data; boundary=" + boundary);
   http::response<http::string_body> res;
   khttpd_fw::HttpContext ctx(req, res);
 
@@ -59,20 +60,25 @@ TEST_F(MultipartEdgeTest, MultipleFilesInSameField)
 }
 
 // Test that same form field name results in last value winning (overwrite)
-TEST_F(MultipartEdgeTest, FormFieldOverwrite)
-{
+TEST_F(MultipartEdgeTest, FormFieldOverwrite) {
   std::string boundary = "----------Boundary456";
   std::string multipart_body =
-    "--" + boundary + "\r\n"
-    "Content-Disposition: form-data; name=\"username\"\r\n\r\n"
-    "first_value\r\n"
-    "--" + boundary + "\r\n"
-    "Content-Disposition: form-data; name=\"username\"\r\n\r\n"
-    "second_value\r\n"
-    "--" + boundary + "--\r\n";
+      "--" + boundary +
+      "\r\n"
+      "Content-Disposition: form-data; name=\"username\"\r\n\r\n"
+      "first_value\r\n"
+      "--" +
+      boundary +
+      "\r\n"
+      "Content-Disposition: form-data; name=\"username\"\r\n\r\n"
+      "second_value\r\n"
+      "--" +
+      boundary + "--\r\n";
 
-  http::request<http::string_body> req = make_request(http::verb::post, "/form", 11, multipart_body);
-  req.set(http::field::content_type, "multipart/form-data; boundary=" + boundary);
+  http::request<http::string_body> req =
+      make_request(http::verb::post, "/form", 11, multipart_body);
+  req.set(http::field::content_type,
+          "multipart/form-data; boundary=" + boundary);
   http::response<http::string_body> res;
   khttpd_fw::HttpContext ctx(req, res);
 
@@ -82,14 +88,15 @@ TEST_F(MultipartEdgeTest, FormFieldOverwrite)
 }
 
 // Test multipart body without proper boundary - should not crash
-TEST_F(MultipartEdgeTest, MissingBoundary)
-{
+TEST_F(MultipartEdgeTest, MissingBoundary) {
   // Body that claims to be multipart but has no proper boundary markers
   std::string boundary = "----------NonExistent";
   std::string body = "This is not a valid multipart body at all";
 
-  http::request<http::string_body> req = make_request(http::verb::post, "/upload", 11, body);
-  req.set(http::field::content_type, "multipart/form-data; boundary=" + boundary);
+  http::request<http::string_body> req =
+      make_request(http::verb::post, "/upload", 11, body);
+  req.set(http::field::content_type,
+          "multipart/form-data; boundary=" + boundary);
   http::response<http::string_body> res;
   khttpd_fw::HttpContext ctx(req, res);
 
@@ -100,17 +107,20 @@ TEST_F(MultipartEdgeTest, MissingBoundary)
   ASSERT_FALSE(ctx.get_multipart_field("any_field").has_value());
 }
 
-TEST_F(MultipartEdgeTest, QuotedBoundary)
-{
+TEST_F(MultipartEdgeTest, QuotedBoundary) {
   std::string boundary = "----QuotedBoundary";
   std::string multipart_body =
-    "--" + boundary + "\r\n"
-    "Content-Disposition: form-data; name=\"field\"\r\n\r\n"
-    "quoted boundary works\r\n"
-    "--" + boundary + "--\r\n";
+      "--" + boundary +
+      "\r\n"
+      "Content-Disposition: form-data; name=\"field\"\r\n\r\n"
+      "quoted boundary works\r\n"
+      "--" +
+      boundary + "--\r\n";
 
-  http::request<http::string_body> req = make_request(http::verb::post, "/form", 11, multipart_body);
-  req.set(http::field::content_type, "multipart/form-data; boundary=\"" + boundary + "\"");
+  http::request<http::string_body> req =
+      make_request(http::verb::post, "/form", 11, multipart_body);
+  req.set(http::field::content_type,
+          "multipart/form-data; boundary=\"" + boundary + "\"");
   http::response<http::string_body> res;
   khttpd_fw::HttpContext ctx(req, res);
 
@@ -118,19 +128,23 @@ TEST_F(MultipartEdgeTest, QuotedBoundary)
   ASSERT_EQ(ctx.get_multipart_field("field").value(), "quoted boundary works");
 }
 
-TEST_F(MultipartEdgeTest, BoundaryTextInsideFileDataIsPreserved)
-{
+TEST_F(MultipartEdgeTest, BoundaryTextInsideFileDataIsPreserved) {
   std::string boundary = "----BoundaryInData";
   std::string file_data = "line one --" + boundary + " is not a delimiter";
   std::string multipart_body =
-    "--" + boundary + "\r\n"
-    "Content-Disposition: form-data; name=\"file\"; filename=\"data.txt\"\r\n"
-    "Content-Type: text/plain\r\n\r\n" +
-    file_data + "\r\n"
-    "--" + boundary + "--\r\n";
+      "--" + boundary +
+      "\r\n"
+      "Content-Disposition: form-data; name=\"file\"; filename=\"data.txt\"\r\n"
+      "Content-Type: text/plain\r\n\r\n" +
+      file_data +
+      "\r\n"
+      "--" +
+      boundary + "--\r\n";
 
-  http::request<http::string_body> req = make_request(http::verb::post, "/upload", 11, multipart_body);
-  req.set(http::field::content_type, "multipart/form-data; boundary=" + boundary);
+  http::request<http::string_body> req =
+      make_request(http::verb::post, "/upload", 11, multipart_body);
+  req.set(http::field::content_type,
+          "multipart/form-data; boundary=" + boundary);
   http::response<http::string_body> res;
   khttpd_fw::HttpContext ctx(req, res);
 

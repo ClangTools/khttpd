@@ -1,22 +1,23 @@
+#include <gtest/gtest.h>
+#include <spdlog/spdlog.h>
+
+#include <array>
+#include <atomic>
+#include <boost/asio/ip/tcp.hpp>
+#include <boost/beast/websocket.hpp>
+#include <boost/json.hpp>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <sstream>
+#include <thread>
+#include <vector>
+
+#include "framework/client/api_macros.hpp"
+#include "framework/client/host_pool.hpp"
 #include "framework/client/http_client.hpp"
 #include "framework/client/http_client_stream.hpp"
 #include "framework/client/websocket_client.hpp"
-#include "framework/client/api_macros.hpp"
-#include "framework/client/host_pool.hpp"
-#include <gtest/gtest.h>
-#include <boost/json.hpp>
-#include <boost/asio/ip/tcp.hpp>
-#include <boost/beast/websocket.hpp>
-#include <map>
-#include <thread>
-#include <atomic>
-#include <array>
-#include <sstream>
-#include <mutex>
-#include <vector>
-#include <memory>
-#include <spdlog/spdlog.h>
-
 #include "io_context_pool.hpp"
 
 using namespace khttpd::framework::client;
@@ -26,50 +27,44 @@ namespace websocket = boost::beast::websocket;
 namespace net = boost::asio;
 using tcp = boost::asio::ip::tcp;
 
-namespace
-{
-class ClientTestLogger : public ::testing::EmptyTestEventListener
-{
-public:
-  void OnTestStart(const ::testing::TestInfo& test_info) override
-  {
-    spdlog::info("[client_test] START {}.{}", test_info.test_suite_name(), test_info.name());
+namespace {
+class ClientTestLogger : public ::testing::EmptyTestEventListener {
+ public:
+  void OnTestStart(const ::testing::TestInfo& test_info) override {
+    spdlog::info("[client_test] START {}.{}", test_info.test_suite_name(),
+                 test_info.name());
   }
 
-  void OnTestEnd(const ::testing::TestInfo& test_info) override
-  {
-    spdlog::info("[client_test] END {}.{} result={}", test_info.test_suite_name(), test_info.name(),
+  void OnTestEnd(const ::testing::TestInfo& test_info) override {
+    spdlog::info("[client_test] END {}.{} result={}",
+                 test_info.test_suite_name(), test_info.name(),
                  test_info.result()->Passed() ? "PASS" : "FAIL");
   }
 };
 
-class ClientTestLoggerEnvironment : public ::testing::Environment
-{
-public:
-  void SetUp() override
-  {
+class ClientTestLoggerEnvironment : public ::testing::Environment {
+ public:
+  void SetUp() override {
     spdlog::set_level(spdlog::level::info);
-    ::testing::UnitTest::GetInstance()->listeners().Append(new ClientTestLogger());
+    ::testing::UnitTest::GetInstance()->listeners().Append(
+        new ClientTestLogger());
     spdlog::info("[client_test] logger installed");
   }
 };
 
 const auto* const kClientTestLoggerEnvironment =
-  ::testing::AddGlobalTestEnvironment(new ClientTestLoggerEnvironment());
+    ::testing::AddGlobalTestEnvironment(new ClientTestLoggerEnvironment());
 
-class LocalHttpEchoServer
-{
-public:
+class LocalHttpEchoServer {
+ public:
   LocalHttpEchoServer()
-    : acceptor_(ioc_, tcp::endpoint(net::ip::address_v4::loopback(), 0)),
-      port_(acceptor_.local_endpoint().port())
-  {
+      : acceptor_(ioc_, tcp::endpoint(net::ip::address_v4::loopback(), 0)),
+        port_(acceptor_.local_endpoint().port()) {
     do_accept();
     thread_ = std::thread([this]() { ioc_.run(); });
   }
 
-  ~LocalHttpEchoServer()
-  {
+  ~LocalHttpEchoServer() {
     spdlog::info("[client_test] LocalHttpEchoServer stopping");
     boost::system::error_code ignored;
     acceptor_.close(ignored);
@@ -80,59 +75,49 @@ public:
       std::lock_guard<std::mutex> lock(workers_mutex_);
       workers.swap(workers_);
     }
-    for (auto& worker : workers)
-    {
+    for (auto& worker : workers) {
       if (worker.joinable()) worker.join();
     }
     spdlog::info("[client_test] LocalHttpEchoServer stopped");
   }
 
-  std::string base_url() const
-  {
+  std::string base_url() const {
     return "http://127.0.0.1:" + std::to_string(port_);
   }
 
-private:
-  void do_accept()
-  {
-    acceptor_.async_accept([this](boost::system::error_code ec, tcp::socket socket)
-    {
-      if (!ec)
-      {
-        std::lock_guard<std::mutex> lock(workers_mutex_);
-        workers_.emplace_back([socket = std::move(socket)]() mutable
-        {
-          handle_session(std::move(socket));
-        });
-      }
+ private:
+  void do_accept() {
+    acceptor_.async_accept(
+        [this](boost::system::error_code ec, tcp::socket socket) {
+          if (!ec) {
+            std::lock_guard<std::mutex> lock(workers_mutex_);
+            workers_.emplace_back([socket = std::move(socket)]() mutable {
+              handle_session(std::move(socket));
+            });
+          }
 
-      if (acceptor_.is_open())
-      {
-        do_accept();
-      }
-    });
+          if (acceptor_.is_open()) {
+            do_accept();
+          }
+        });
   }
 
-  static std::string query_value(std::string target, const std::string& key)
-  {
+  static std::string query_value(std::string target, const std::string& key) {
     const auto query_pos = target.find('?');
     if (query_pos == std::string::npos) return "";
     std::string query = target.substr(query_pos + 1);
     std::istringstream parts(query);
     std::string item;
-    while (std::getline(parts, item, '&'))
-    {
+    while (std::getline(parts, item, '&')) {
       const auto eq_pos = item.find('=');
-      if (eq_pos != std::string::npos && item.substr(0, eq_pos) == key)
-      {
+      if (eq_pos != std::string::npos && item.substr(0, eq_pos) == key) {
         return item.substr(eq_pos + 1);
       }
     }
     return "";
   }
 
-  static void handle_session(tcp::socket socket)
-  {
+  static void handle_session(tcp::socket socket) {
     beast::flat_buffer buffer;
     boost::system::error_code ec;
     http::request_parser<http::string_body> parser;
@@ -147,32 +132,24 @@ private:
     res.keep_alive(false);
 
     const std::string target(req.target());
-    if (target.rfind("/get", 0) == 0)
-    {
+    if (target.rfind("/get", 0) == 0) {
       res.body() = "{\"foo\":\"" + query_value(target, "foo") + "\",\"id\":\"" +
-        query_value(target, "id") + "\",\"msg\":\"" + query_value(target, "msg") + "\"}";
-    }
-    else if (target.rfind("/headers", 0) == 0)
-    {
+                   query_value(target, "id") + "\",\"msg\":\"" +
+                   query_value(target, "msg") + "\"}";
+    } else if (target.rfind("/headers", 0) == 0) {
       std::string body = "{";
-      for (const auto& field : req)
-      {
-        body += "\"" + std::string(field.name_string()) + "\":\"" + std::string(field.value()) + "\",";
+      for (const auto& field : req) {
+        body += "\"" + std::string(field.name_string()) + "\":\"" +
+                std::string(field.value()) + "\",";
       }
       body += "\"done\":true}";
       res.body() = std::move(body);
-    }
-    else if (target.rfind("/post", 0) == 0)
-    {
+    } else if (target.rfind("/post", 0) == 0) {
       res.body() = "{\"data\":" + req.body() + "}";
-    }
-    else if (target.rfind("/stream", 0) == 0)
-    {
+    } else if (target.rfind("/stream", 0) == 0) {
       res.set(http::field::content_type, "application/octet-stream");
       res.body() = req.body();
-    }
-    else
-    {
+    } else {
       res.body() = "{\"target\":\"" + target + "\"}";
     }
 
@@ -189,26 +166,21 @@ private:
   std::vector<std::thread> workers_;
 };
 
-class LocalWebSocketEchoServer
-{
-public:
+class LocalWebSocketEchoServer {
+ public:
   LocalWebSocketEchoServer()
-    : acceptor_(ioc_, tcp::endpoint(net::ip::address_v4::loopback(), 0)),
-      port_(acceptor_.local_endpoint().port())
-  {
+      : acceptor_(ioc_, tcp::endpoint(net::ip::address_v4::loopback(), 0)),
+        port_(acceptor_.local_endpoint().port()) {
     do_accept();
     thread_ = std::thread([this]() { ioc_.run(); });
   }
 
-  ~LocalWebSocketEchoServer()
-  {
+  ~LocalWebSocketEchoServer() {
     spdlog::info("[client_test] LocalWebSocketEchoServer stopping");
-    net::post(ioc_, [this]()
-    {
+    net::post(ioc_, [this]() {
       boost::system::error_code ignored;
       acceptor_.close(ignored);
-      if (ws_)
-      {
+      if (ws_) {
         beast::get_lowest_layer(*ws_).cancel(ignored);
         beast::get_lowest_layer(*ws_).close(ignored);
       }
@@ -218,45 +190,40 @@ public:
     spdlog::info("[client_test] LocalWebSocketEchoServer stopped");
   }
 
-  std::string url() const
-  {
-    return "ws://127.0.0.1:" + std::to_string(port_);
-  }
+  std::string url() const { return "ws://127.0.0.1:" + std::to_string(port_); }
 
-private:
-  void do_accept()
-  {
-    acceptor_.async_accept([this](boost::system::error_code ec, tcp::socket socket)
-    {
+ private:
+  void do_accept() {
+    acceptor_.async_accept([this](boost::system::error_code ec,
+                                  tcp::socket socket) {
       if (ec) return;
 
       ws_ = std::make_shared<websocket::stream<tcp::socket>>(std::move(socket));
-      ws_->async_accept([this, ws = ws_](boost::system::error_code accept_ec)
-      {
+      ws_->async_accept([this, ws = ws_](boost::system::error_code accept_ec) {
         if (accept_ec) return;
         do_read(ws, 0);
       });
     });
   }
 
-  void do_read(std::shared_ptr<websocket::stream<tcp::socket>> ws, int count)
-  {
-    if (count >= 5)
-    {
-      ws->async_close(websocket::close_code::normal, [](boost::system::error_code) {});
+  void do_read(std::shared_ptr<websocket::stream<tcp::socket>> ws, int count) {
+    if (count >= 5) {
+      ws->async_close(websocket::close_code::normal,
+                      [](boost::system::error_code) {});
       return;
     }
 
     auto buffer = std::make_shared<beast::flat_buffer>();
-    ws->async_read(*buffer, [this, ws, buffer, count](boost::system::error_code ec, std::size_t)
-    {
+    ws->async_read(*buffer, [this, ws, buffer, count](
+                                boost::system::error_code ec, std::size_t) {
       if (ec) return;
       ws->text(ws->got_text());
-      ws->async_write(buffer->data(), [this, ws, count](boost::system::error_code write_ec, std::size_t)
-      {
-        if (write_ec) return;
-        do_read(ws, count + 1);
-      });
+      ws->async_write(
+          buffer->data(),
+          [this, ws, count](boost::system::error_code write_ec, std::size_t) {
+            if (write_ec) return;
+            do_read(ws, count + 1);
+          });
     });
   }
 
@@ -267,22 +234,19 @@ private:
   std::shared_ptr<websocket::stream<tcp::socket>> ws_;
 };
 
-LocalHttpEchoServer& local_http_echo_server()
-{
+LocalHttpEchoServer& local_http_echo_server() {
   static LocalHttpEchoServer server;
   return server;
 }
-}
+}  // namespace
 
 // ==========================================
 // 1. 定义 PostmanEchoClient 类
 // ==========================================
-class PostmanEchoClient : public HttpClient
-{
-public:
+class PostmanEchoClient : public HttpClient {
+ public:
   // 构造函数：注入 ioc，并设置默认 Base URL
-  PostmanEchoClient()
-  {
+  PostmanEchoClient() {
     set_base_url(local_http_echo_server().base_url());
     // 设置一个较长的超时时间，防止 CI 环境网络慢
     set_timeout(std::chrono::seconds(10));
@@ -295,8 +259,7 @@ public:
   // 1. GET 请求，带查询参数
   // Endpoint: /get?foo=bar
   API_CALL(http::verb::get, "/get", echo_get,
-           QUERY(std::string, foo_val, "foo"),
-           QUERY(int, id_val, "id"))
+           QUERY(std::string, foo_val, "foo"), QUERY(int, id_val, "id"))
 
   // 2. POST 请求，带 JSON Body
   // Endpoint: /post
@@ -311,7 +274,8 @@ public:
            HEADER(std::string, user_token, "X-User-Token"))
 
   // 4. PUT 请求，带路径参数
-  // Endpoint: /put (Postman echo 实际上忽略路径后的东西，但我们可以测试 URL 拼接)
+  // Endpoint: /put (Postman echo 实际上忽略路径后的东西，但我们可以测试 URL
+  // 拼接)
   API_CALL(http::verb::put, "/put", echo_put_dummy)
 };
 
@@ -319,49 +283,40 @@ public:
 // 2. 测试用例
 // ==========================================
 
-class ClientTest : public ::testing::Test
-{
-protected:
+class ClientTest : public ::testing::Test {
+ protected:
   boost::asio::io_context ioc;
   std::shared_ptr<PostmanEchoClient> client;
 
   // 辅助：用于在主线程等待异步结果
-  void run_until_complete()
-  {
+  void run_until_complete() {
     ioc.run();
-    ioc.restart(); // 重置以便下次使用
+    ioc.restart();  // 重置以便下次使用
   }
 
-  void SetUp() override
-  {
-    client = std::make_shared<PostmanEchoClient>();
-  }
+  void SetUp() override { client = std::make_shared<PostmanEchoClient>(); }
 };
-
 
 // 辅助宏：等待异步结果
 // 如果 5 秒没结果，这就认为超时失败
-#define WAIT_FOR_ASYNC(future) \
-    ASSERT_EQ(future.wait_for(std::chrono::seconds(5)), std::future_status::ready) << "Async operation timed out";
+#define WAIT_FOR_ASYNC(future)                        \
+  ASSERT_EQ(future.wait_for(std::chrono::seconds(5)), \
+            std::future_status::ready)                \
+      << "Async operation timed out";
 
-TEST_F(ClientTest, GetWithQueryParams)
-{
+TEST_F(ClientTest, GetWithQueryParams) {
   // 创建一个 promise 用于通知主线程任务完成
   std::promise<void> promise;
   auto future = promise.get_future();
 
-  client->echo_get("hello", 123, [&](auto ec, auto res)
-  {
+  client->echo_get("hello", 123, [&](auto ec, auto res) {
     // 这里的代码在后台线程运行
-    if (!ec)
-    {
+    if (!ec) {
       EXPECT_EQ(res.result(), http::status::ok);
       std::string body = res.body();
       EXPECT_TRUE(body.find("\"foo\":\"hello\"") != std::string::npos);
       EXPECT_TRUE(body.find("\"id\":\"123\"") != std::string::npos);
-    }
-    else
-    {
+    } else {
       ADD_FAILURE() << "Network error: " << ec.message();
     }
 
@@ -373,8 +328,19 @@ TEST_F(ClientTest, GetWithQueryParams)
   WAIT_FOR_ASYNC(future);
 }
 
-TEST_F(ClientTest, PostJsonBody)
-{
+TEST(HttpClientLocalTest, SyncRequestAcceptsQueryInPathForCompatibility) {
+  HttpClient client;
+  client.set_base_url(local_http_echo_server().base_url());
+  client.set_timeout(std::chrono::seconds(5));
+
+  const auto response = client.request_sync(
+      http::verb::get, "/get?foo=legacy&id=7", {}, "", {});
+  ASSERT_EQ(response.result(), http::status::ok);
+  EXPECT_NE(response.body().find("\"foo\":\"legacy\""), std::string::npos);
+  EXPECT_NE(response.body().find("\"id\":\"7\""), std::string::npos);
+}
+
+TEST_F(ClientTest, PostJsonBody) {
   std::promise<void> promise;
   auto future = promise.get_future();
 
@@ -382,16 +348,12 @@ TEST_F(ClientTest, PostJsonBody)
   jv["message"] = "test_payload";
   jv["count"] = 99;
 
-  client->echo_post(jv, [&](auto ec, auto res)
-  {
-    if (!ec)
-    {
+  client->echo_post(jv, [&](auto ec, auto res) {
+    if (!ec) {
       EXPECT_EQ(res.result(), http::status::ok);
       std::string body = res.body();
       EXPECT_TRUE(body.find("test_payload") != std::string::npos);
-    }
-    else
-    {
+    } else {
       ADD_FAILURE() << "Network error: " << ec.message();
     }
     promise.set_value();
@@ -400,30 +362,25 @@ TEST_F(ClientTest, PostJsonBody)
   WAIT_FOR_ASYNC(future);
 }
 
-TEST_F(ClientTest, CustomHeaders)
-{
+TEST_F(ClientTest, CustomHeaders) {
   std::promise<void> promise;
   auto future = promise.get_future();
 
   std::string rid = "req-unique-id-001";
   std::string token = "secret-token-abc";
 
-  client->echo_headers(rid, token, [&](auto ec, auto res)
-  {
-    if (!ec)
-    {
+  client->echo_headers(rid, token, [&](auto ec, auto res) {
+    if (!ec) {
       EXPECT_EQ(res.result(), http::status::ok);
       std::string body = res.body();
 
       bool has_rid = body.find("x-my-request-id") != std::string::npos ||
-        body.find("X-My-Request-Id") != std::string::npos;
+                     body.find("X-My-Request-Id") != std::string::npos;
       bool has_val = body.find(rid) != std::string::npos;
 
       EXPECT_TRUE(has_rid) << "Missing Header Key";
       EXPECT_TRUE(has_val) << "Missing Header Value";
-    }
-    else
-    {
+    } else {
       ADD_FAILURE() << "Network error: " << ec.message();
     }
     promise.set_value();
@@ -432,17 +389,14 @@ TEST_F(ClientTest, CustomHeaders)
   WAIT_FOR_ASYNC(future);
 }
 
-TEST_F(ClientTest, GlobalDefaultHeader)
-{
+TEST_F(ClientTest, GlobalDefaultHeader) {
   std::promise<void> promise;
   auto future = promise.get_future();
 
   client->set_default_header("X-App-Version", "v1.0.0-beta");
 
-  client->echo_headers("id-1", "token-1", [&](auto ec, auto res)
-  {
-    if (!ec)
-    {
+  client->echo_headers("id-1", "token-1", [&](auto ec, auto res) {
+    if (!ec) {
       std::string body = res.body();
       EXPECT_TRUE(body.find("v1.0.0-beta") != std::string::npos);
     }
@@ -453,44 +407,33 @@ TEST_F(ClientTest, GlobalDefaultHeader)
 }
 
 // 同步调用测试 (现在非常安全，不会死锁)
-TEST_F(ClientTest, SyncCallSafe)
-{
-  try
-  {
+TEST_F(ClientTest, SyncCallSafe) {
+  try {
     // 主线程调用，后台线程执行，future wait 自动处理
     auto res = client->echo_get_sync("sync_world", 999);
 
     EXPECT_EQ(res.result(), http::status::ok);
     std::string body = res.body();
     EXPECT_TRUE(body.find("sync_world") != std::string::npos);
-  }
-  catch (const std::exception& e)
-  {
+  } catch (const std::exception& e) {
     ADD_FAILURE() << "Sync request exception: " << e.what();
   }
 }
 
-TEST_F(ClientTest, SyncCall)
-{
+TEST_F(ClientTest, SyncCall) {
   // 重要：同步调用会阻塞当前线程等待 future，
   // 所以 io_context 必须在另一个线程跑，否则死锁。
   auto work = boost::asio::make_work_guard(ioc);
-  std::thread ioc_thread([&]
-  {
-    ioc.run();
-  });
+  std::thread ioc_thread([&] { ioc.run(); });
 
-  try
-  {
+  try {
     // 使用同步生成的 API
     auto res = client->echo_get_sync("sync_world", 999);
 
     EXPECT_EQ(res.result(), http::status::ok);
     std::string body = res.body();
     EXPECT_TRUE(body.find("sync_world") != std::string::npos);
-  }
-  catch (const std::exception& e)
-  {
+  } catch (const std::exception& e) {
     ADD_FAILURE() << "Sync request exception: " << e.what();
   }
 
@@ -500,33 +443,27 @@ TEST_F(ClientTest, SyncCall)
   if (ioc_thread.joinable()) ioc_thread.join();
 }
 
-TEST(EasyModeTest, SyncRequestWithoutManualContext)
-{
+TEST(EasyModeTest, SyncRequestWithoutManualContext) {
   // 不需要手动创建 ioc, work_guard, thread
-  auto client = std::make_shared<PostmanEchoClient>(); // 使用默认构造
+  auto client = std::make_shared<PostmanEchoClient>();  // 使用默认构造
 
-  try
-  {
+  try {
     // 直接调用同步接口
     auto res = client->echo_get_sync("easy_mode", 1);
     EXPECT_EQ(res.result(), http::status::ok);
     EXPECT_TRUE(res.body().find("easy_mode") != std::string::npos);
-  }
-  catch (const std::exception& e)
-  {
+  } catch (const std::exception& e) {
     ADD_FAILURE() << "Exception: " << e.what();
   }
 }
 
-TEST(EasyModeTest, AsyncRequest)
-{
+TEST(EasyModeTest, AsyncRequest) {
   auto client = std::make_shared<PostmanEchoClient>();
 
   std::promise<void> done;
   auto future = done.get_future();
 
-  client->echo_get("async_easy", 2, [&](auto ec, auto res)
-  {
+  client->echo_get("async_easy", 2, [&](auto ec, auto res) {
     EXPECT_FALSE(ec);
     done.set_value();
   });
@@ -536,49 +473,45 @@ TEST(EasyModeTest, AsyncRequest)
   future.wait();
 }
 
-TEST(HttpClientLocalTest, SyncRequestWithUnrunExternalIoContextTimesOut)
-{
+TEST(HttpClientLocalTest, SyncRequestWithUnrunExternalIoContextTimesOut) {
   boost::asio::io_context ioc;
   HttpClient client(ioc);
   client.set_base_url("http://127.0.0.1:9");
   client.set_timeout(std::chrono::seconds(0));
 
   auto start = std::chrono::steady_clock::now();
-  EXPECT_THROW(
-    client.request_sync(http::verb::get, "/", {}, "", {}),
-    boost::system::system_error);
+  EXPECT_THROW(client.request_sync(http::verb::get, "/", {}, "", {}),
+               boost::system::system_error);
   auto elapsed = std::chrono::steady_clock::now() - start;
 
   EXPECT_LT(elapsed, std::chrono::seconds(2));
 }
 
-TEST(HttpClientLocalTest, SyncRequestTimeoutClosesStalledConnection)
-{
+TEST(HttpClientLocalTest, SyncRequestTimeoutClosesStalledConnection) {
   boost::asio::io_context server_ioc;
-  tcp::acceptor acceptor(server_ioc, {boost::asio::ip::make_address("127.0.0.1"), 0});
+  tcp::acceptor acceptor(server_ioc,
+                         {boost::asio::ip::make_address("127.0.0.1"), 0});
   const auto endpoint = acceptor.local_endpoint();
   std::atomic<bool> accepted{false};
   std::atomic<bool> client_closed{false};
   auto server_socket = std::make_shared<tcp::socket>(server_ioc);
   auto read_buffer = std::make_shared<std::array<char, 1024>>();
   auto read_until_close = std::make_shared<std::function<void()>>();
-  *read_until_close = [server_socket, read_buffer, read_until_close, &client_closed]()
-  {
-    server_socket->async_read_some(boost::asio::buffer(*read_buffer),
-                                   [read_until_close, &client_closed](boost::system::error_code read_ec,
-                                                                      std::size_t)
-                                   {
-                                     if (read_ec)
-                                     {
-                                       client_closed = true;
-                                       return;
-                                     }
-                                     (*read_until_close)();
-                                   });
+  *read_until_close = [server_socket, read_buffer, read_until_close,
+                       &client_closed]() {
+    server_socket->async_read_some(
+        boost::asio::buffer(*read_buffer),
+        [read_until_close, &client_closed](boost::system::error_code read_ec,
+                                           std::size_t) {
+          if (read_ec) {
+            client_closed = true;
+            return;
+          }
+          (*read_until_close)();
+        });
   };
 
-  acceptor.async_accept(*server_socket, [&](boost::system::error_code ec)
-  {
+  acceptor.async_accept(*server_socket, [&](boost::system::error_code ec) {
     ASSERT_FALSE(ec) << ec.message();
     accepted = true;
     (*read_until_close)();
@@ -594,10 +527,10 @@ TEST(HttpClientLocalTest, SyncRequestTimeoutClosesStalledConnection)
   client.set_base_url("http://127.0.0.1:" + std::to_string(endpoint.port()));
   client.set_timeout(std::chrono::seconds(1));
 
-  EXPECT_THROW(client.request_sync(http::verb::get, "/", {}, "", {}), boost::system::system_error);
+  EXPECT_THROW(client.request_sync(http::verb::get, "/", {}, "", {}),
+               boost::system::system_error);
 
-  for (int i = 0; i < 100 && (!accepted || !client_closed); ++i)
-  {
+  for (int i = 0; i < 100 && (!accepted || !client_closed); ++i) {
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
 
@@ -611,13 +544,11 @@ TEST(HttpClientLocalTest, SyncRequestTimeoutClosesStalledConnection)
   EXPECT_TRUE(client_closed);
 }
 
-
 // ==========================================
 // WebSocket 测试
 // ==========================================
 
-TEST(HttpClientStreamTest, StreamsRequestAndResponseWithBoundedBuffers)
-{
+TEST(HttpClientStreamTest, StreamsRequestAndResponseWithBoundedBuffers) {
   LocalHttpEchoServer server;
   net::io_context ioc;
   auto client = std::make_shared<HttpClientStream>(ioc);
@@ -631,62 +562,64 @@ TEST(HttpClientStreamTest, StreamsRequestAndResponseWithBoundedBuffers)
 
   HttpClientStream::RequestHead head{http::verb::post, "/stream", 11};
   head.content_length(payload->size());
-  *read_next = [client, received, read_buffer, read_next, &completed]
-  {
-    client->async_read_some(net::buffer(*read_buffer),
-      [client, received, read_buffer, read_next, &completed](beast::error_code ec, std::size_t n, bool done)
-      {
-        ASSERT_FALSE(ec) << ec.message(); *received += n;
-        if (!done) return (*read_next)();
-        completed = true;
-      });
-  };
-  *write_next = [client, payload, offset, write_next, read_next]
-  {
-    if (*offset == payload->size())
-    {
-      return client->async_finish_request([client, read_next](beast::error_code ec)
-      {
-        ASSERT_FALSE(ec) << ec.message();
-        client->async_read_response_head([read_next](beast::error_code head_ec, HttpClientStream::ResponseHead head)
-        {
-          ASSERT_FALSE(head_ec) << head_ec.message(); EXPECT_EQ(head.result(), http::status::ok); (*read_next)();
+  *read_next = [client, received, read_buffer, read_next, &completed] {
+    client->async_read_some(
+        net::buffer(*read_buffer),
+        [client, received, read_buffer, read_next, &completed](
+            beast::error_code ec, std::size_t n, bool done) {
+          ASSERT_FALSE(ec) << ec.message();
+          *received += n;
+          if (!done) return (*read_next)();
+          completed = true;
         });
-      });
+  };
+  *write_next = [client, payload, offset, write_next, read_next] {
+    if (*offset == payload->size()) {
+      return client->async_finish_request(
+          [client, read_next](beast::error_code ec) {
+            ASSERT_FALSE(ec) << ec.message();
+            client->async_read_response_head(
+                [read_next](beast::error_code head_ec,
+                            HttpClientStream::ResponseHead head) {
+                  ASSERT_FALSE(head_ec) << head_ec.message();
+                  EXPECT_EQ(head.result(), http::status::ok);
+                  (*read_next)();
+                });
+          });
     }
-    const auto size = std::min<std::size_t>(32 * 1024, payload->size() - *offset);
+    const auto size =
+        std::min<std::size_t>(32 * 1024, payload->size() - *offset);
     const auto chunk = net::buffer(payload->data() + *offset, size);
-    client->async_write_some(chunk, [offset, size, write_next](beast::error_code ec)
-    {
-      ASSERT_FALSE(ec) << ec.message(); *offset += size; (*write_next)();
-    });
+    client->async_write_some(chunk,
+                             [offset, size, write_next](beast::error_code ec) {
+                               ASSERT_FALSE(ec) << ec.message();
+                               *offset += size;
+                               (*write_next)();
+                             });
   };
   client->async_start(server.base_url() + "/stream", std::move(head),
-    [write_next](beast::error_code ec) { ASSERT_FALSE(ec) << ec.message(); (*write_next)(); });
+                      [write_next](beast::error_code ec) {
+                        ASSERT_FALSE(ec) << ec.message();
+                        (*write_next)();
+                      });
   ioc.run();
   EXPECT_TRUE(completed);
   EXPECT_EQ(*received, payload->size());
 }
 
-class WebsocketTest : public ::testing::Test
-{
-protected:
+class WebsocketTest : public ::testing::Test {
+ protected:
   boost::asio::io_context ioc;
   std::shared_ptr<WebsocketClient> ws_client;
 
-  void SetUp() override
-  {
-    ws_client = std::make_shared<WebsocketClient>(ioc);
-  }
+  void SetUp() override { ws_client = std::make_shared<WebsocketClient>(ioc); }
 
-  void TearDown() override
-  {
+  void TearDown() override {
     if (ws_client) ws_client->close();
   }
 };
 
-TEST_F(WebsocketTest, WssEchoAndWriteQueue)
-{
+TEST_F(WebsocketTest, WssEchoAndWriteQueue) {
   LocalWebSocketEchoServer server;
   std::string url = server.url();
 
@@ -700,63 +633,55 @@ TEST_F(WebsocketTest, WssEchoAndWriteQueue)
   // 创建定时器，但先不 async_wait，后面逻辑控制
   boost::asio::steady_timer timer(ioc, std::chrono::seconds(15));
 
-  ws_client->set_on_message([&](const std::string& msg)
-  {
+  ws_client->set_on_message([&](const std::string& msg) {
     // 过滤欢迎消息
     if (msg.find("Request served by") != std::string::npos) return;
 
     received_count++;
     // spdlog::debug("Msg: {}", msg);
 
-    if (received_count >= message_count)
-    {
+    if (received_count >= message_count) {
       ws_client->close();
     }
   });
 
-  ws_client->set_on_close([&]()
-  {
+  ws_client->set_on_close([&]() {
     closed_gracefully = true;
     // 关键：连接关闭后，取消定时器，ioc.run() 就会立即返回
     timer.cancel();
   });
 
-  ws_client->set_on_error([&](boost::beast::error_code ec)
-  {
+  ws_client->set_on_error([&](boost::beast::error_code ec) {
     // 忽略操作取消（通常是 close() 导致的 pending read 取消）
     if (ec == boost::asio::error::operation_aborted) return;
 
     spdlog::error("WS Error: {}", ec.message());
     has_error = true;
-    timer.cancel(); // 发生错误也停止测试
+    timer.cancel();  // 发生错误也停止测试
   });
 
-  ws_client->connect(url, [&](boost::beast::error_code ec)
-  {
-    if (ec)
-    {
+  ws_client->connect(url, [&](boost::beast::error_code ec) {
+    if (ec) {
       ADD_FAILURE() << "WS Connect Failed: " << ec.message();
       timer.cancel();
       return;
     }
 
-    for (int i = 0; i < message_count; ++i)
-    {
+    for (int i = 0; i < message_count; ++i) {
       ws_client->send("Msg-" + std::to_string(i));
     }
   });
 
   // 启动超时计时
-  timer.async_wait([&](boost::system::error_code ec)
-  {
-    if (ec == boost::asio::error::operation_aborted)
-    {
+  timer.async_wait([&](boost::system::error_code ec) {
+    if (ec == boost::asio::error::operation_aborted) {
       // 定时器被取消，说明测试正常结束或提前出错
       return;
     }
     // 定时器真的触发了 -> 超时
     ws_client->close();
-    ADD_FAILURE() << "Test Timed Out! Received: " << received_count << "/" << message_count;
+    ADD_FAILURE() << "Test Timed Out! Received: " << received_count << "/"
+                  << message_count;
   });
 
   ioc.run();
@@ -766,29 +691,29 @@ TEST_F(WebsocketTest, WssEchoAndWriteQueue)
   EXPECT_TRUE(closed_gracefully) << "on_close should be triggered";
 }
 
-TEST_F(WebsocketTest, FrameHandlerPreservesBinaryTypeAndPayload)
-{
+TEST_F(WebsocketTest, FrameHandlerPreservesBinaryTypeAndPayload) {
   LocalWebSocketEchoServer server;
   bool connected = false;
   bool received = false;
   boost::asio::steady_timer timer(ioc, std::chrono::seconds(5));
 
-  ws_client->set_on_frame([&](const khttpd::framework::WebsocketFrame& frame)
-  {
+  ws_client->set_on_frame([&](const khttpd::framework::WebsocketFrame& frame) {
     if (frame.type != khttpd::framework::WebsocketFrameType::binary) return;
     received = frame.payload == std::string("\x00\x01\xff", 3);
     ws_client->close();
     timer.cancel();
   });
-  ws_client->connect(server.url(), [&](boost::beast::error_code ec)
-  {
+  ws_client->connect(server.url(), [&](boost::beast::error_code ec) {
     ASSERT_FALSE(ec) << ec.message();
     connected = true;
-    ws_client->send({khttpd::framework::WebsocketFrameType::binary, std::string("\x00\x01\xff", 3)});
+    ws_client->send({khttpd::framework::WebsocketFrameType::binary,
+                     std::string("\x00\x01\xff", 3)});
   });
-  timer.async_wait([&](boost::system::error_code ec)
-  {
-    if (!ec) { ws_client->close(); ADD_FAILURE() << "Frame echo timed out"; }
+  timer.async_wait([&](boost::system::error_code ec) {
+    if (!ec) {
+      ws_client->close();
+      ADD_FAILURE() << "Frame echo timed out";
+    }
   });
   ioc.run();
 
@@ -796,14 +721,11 @@ TEST_F(WebsocketTest, FrameHandlerPreservesBinaryTypeAndPayload)
   EXPECT_TRUE(received);
 }
 
-TEST_F(WebsocketTest, ConnectFailure)
-{
+TEST_F(WebsocketTest, ConnectFailure) {
   // 测试连接不可达端口
   bool failed = false;
-  ws_client->connect("ws://localhost:59999", [&](boost::beast::error_code ec)
-  {
-    if (ec)
-    {
+  ws_client->connect("ws://localhost:59999", [&](boost::beast::error_code ec) {
+    if (ec) {
       failed = true;
     }
   });
@@ -812,10 +734,10 @@ TEST_F(WebsocketTest, ConnectFailure)
   EXPECT_TRUE(failed);
 }
 
-TEST_F(WebsocketTest, CloseBeforeHandshakeSuppressesConnectCallback)
-{
+TEST_F(WebsocketTest, CloseBeforeHandshakeSuppressesConnectCallback) {
   boost::asio::io_context server_ioc;
-  tcp::acceptor acceptor(server_ioc, {boost::asio::ip::make_address("127.0.0.1"), 0});
+  tcp::acceptor acceptor(server_ioc,
+                         {boost::asio::ip::make_address("127.0.0.1"), 0});
   const auto endpoint = acceptor.local_endpoint();
   auto server_socket = std::make_shared<tcp::socket>(server_ioc);
 
@@ -823,10 +745,8 @@ TEST_F(WebsocketTest, CloseBeforeHandshakeSuppressesConnectCallback)
   std::thread server_thread([&] { server_ioc.run(); });
 
   std::atomic<int> connect_calls{0};
-  ws_client->connect("ws://127.0.0.1:" + std::to_string(endpoint.port()), [&](boost::beast::error_code)
-  {
-    ++connect_calls;
-  });
+  ws_client->connect("ws://127.0.0.1:" + std::to_string(endpoint.port()),
+                     [&](boost::beast::error_code) { ++connect_calls; });
   ws_client->close();
 
   boost::asio::steady_timer timer(ioc, std::chrono::milliseconds(300));
@@ -839,10 +759,10 @@ TEST_F(WebsocketTest, CloseBeforeHandshakeSuppressesConnectCallback)
   EXPECT_EQ(connect_calls.load(), 0);
 }
 
-TEST(WebsocketClientLifecycleTest, DestructorSuppressesPendingConnectCallback)
-{
+TEST(WebsocketClientLifecycleTest, DestructorSuppressesPendingConnectCallback) {
   boost::asio::io_context server_ioc;
-  tcp::acceptor acceptor(server_ioc, {boost::asio::ip::make_address("127.0.0.1"), 0});
+  tcp::acceptor acceptor(server_ioc,
+                         {boost::asio::ip::make_address("127.0.0.1"), 0});
   const auto endpoint = acceptor.local_endpoint();
   auto server_socket = std::make_shared<tcp::socket>(server_ioc);
 
@@ -853,10 +773,8 @@ TEST(WebsocketClientLifecycleTest, DestructorSuppressesPendingConnectCallback)
   std::atomic<int> connect_calls{0};
   {
     auto client = std::make_shared<WebsocketClient>(client_ioc);
-    client->connect("ws://127.0.0.1:" + std::to_string(endpoint.port()), [&](boost::beast::error_code)
-    {
-      ++connect_calls;
-    });
+    client->connect("ws://127.0.0.1:" + std::to_string(endpoint.port()),
+                    [&](boost::beast::error_code) { ++connect_calls; });
   }
 
   boost::asio::steady_timer timer(client_ioc, std::chrono::milliseconds(300));
@@ -869,24 +787,25 @@ TEST(WebsocketClientLifecycleTest, DestructorSuppressesPendingConnectCallback)
   EXPECT_EQ(connect_calls.load(), 0);
 }
 
-TEST_F(ClientTest, ThreadPoolVerify)
-{
-  spdlog::debug("Pool Size: {}", khttpd::framework::IoContextPool::instance().get_thread_count());
+TEST_F(ClientTest, ThreadPoolVerify) {
+  spdlog::debug(
+      "Pool Size: {}",
+      khttpd::framework::IoContextPool::instance().get_thread_count());
 
   std::promise<void> p1, p2;
   auto f1 = p1.get_future();
   auto f2 = p2.get_future();
 
   // 发起两个请求
-  client->echo_get("A", 1, [&](auto, auto)
-  {
-    spdlog::debug("Req 1 processed on thread hash: {}", std::hash<std::thread::id>{}(std::this_thread::get_id()));
+  client->echo_get("A", 1, [&](auto, auto) {
+    spdlog::debug("Req 1 processed on thread hash: {}",
+                  std::hash<std::thread::id>{}(std::this_thread::get_id()));
     p1.set_value();
   });
 
-  client->echo_get("B", 2, [&](auto, auto)
-  {
-    spdlog::debug("Req 2 processed on thread hash: {}", std::hash<std::thread::id>{}(std::this_thread::get_id()));
+  client->echo_get("B", 2, [&](auto, auto) {
+    spdlog::debug("Req 2 processed on thread hash: {}",
+                  std::hash<std::thread::id>{}(std::this_thread::get_id()));
     p2.set_value();
   });
 
@@ -898,26 +817,22 @@ TEST_F(ClientTest, ThreadPoolVerify)
 // 3. Oat++-style API Client Tests
 // ==========================================
 
-// Define API client using KHTTPD_API_CLIENT (single host, endpoints use API_CALL)
+// Define API client using KHTTPD_API_CLIENT (single host, endpoints use
+// API_CALL)
 KHTTPD_API_CLIENT(EchoClient, "http://127.0.0.1:1")
-    API_CALL(http::verb::get, "/get", get_echo,
-             QUERY(std::string, msg, "msg"))
-    API_CALL(http::verb::post, "/post", post_echo,
-             BODY(boost::json::object, body))
+API_CALL(http::verb::get, "/get", get_echo, QUERY(std::string, msg, "msg"))
+API_CALL(http::verb::post, "/post", post_echo, BODY(boost::json::object, body))
 KHTTPD_API_CLIENT_END()
 
 // Define API client using KHTTPD_API_CLIENT_POOL (multi-host with weights)
 KHTTPD_API_CLIENT_POOL(MultiHostClient,
-    KHTTPD_HOST("http://127.0.0.1:1", 3)
-    KHTTPD_HOST("http://127.0.0.1:1", 1)
-)
-    API_CALL(http::verb::get, "/get", get_echo,
-             QUERY(std::string, msg, "msg"))
+                       KHTTPD_HOST("http://127.0.0.1:1", 3)
+                           KHTTPD_HOST("http://127.0.0.1:1", 1))
+API_CALL(http::verb::get, "/get", get_echo, QUERY(std::string, msg, "msg"))
 KHTTPD_API_CLIENT_END()
 
 // Test verb_from_string
-TEST(ApiMacrosTest, VerbFromString)
-{
+TEST(ApiMacrosTest, VerbFromString) {
   ASSERT_EQ(verb_from_string("GET"), http::verb::get);
   ASSERT_EQ(verb_from_string("get"), http::verb::get);
   ASSERT_EQ(verb_from_string("POST"), http::verb::post);
@@ -927,12 +842,11 @@ TEST(ApiMacrosTest, VerbFromString)
   ASSERT_EQ(verb_from_string("PATCH"), http::verb::patch);
   ASSERT_EQ(verb_from_string("HEAD"), http::verb::head);
   ASSERT_EQ(verb_from_string("OPTIONS"), http::verb::options);
-  ASSERT_EQ(verb_from_string("UNKNOWN"), http::verb::get); // fallback
+  ASSERT_EQ(verb_from_string("UNKNOWN"), http::verb::get);  // fallback
 }
 
 // Test single-host KHTTPD_API_CLIENT
-TEST_F(ClientTest, OatppStyleSingleHost)
-{
+TEST_F(ClientTest, OatppStyleSingleHost) {
   auto echo = std::make_shared<EchoClient>();
   echo->set_base_url(local_http_echo_server().base_url());
   echo->set_timeout(std::chrono::seconds(10));
@@ -954,8 +868,7 @@ TEST_F(ClientTest, OatppStyleSingleHost)
 }
 
 // Test sync version
-TEST_F(ClientTest, OatppStyleSync)
-{
+TEST_F(ClientTest, OatppStyleSync) {
   auto echo = std::make_shared<EchoClient>();
   echo->set_base_url(local_http_echo_server().base_url());
   echo->set_timeout(std::chrono::seconds(10));
@@ -970,11 +883,10 @@ TEST_F(ClientTest, OatppStyleSync)
 }
 
 // Test multi-host pool
-TEST(ApiMacrosTest, HostPoolWeighted)
-{
+TEST(ApiMacrosTest, HostPoolWeighted) {
   std::vector<HostEntry> hosts = {
-    {"http://host-a.com", 3},
-    {"http://host-b.com", 1},
+      {"http://host-a.com", 3},
+      {"http://host-b.com", 1},
   };
   HostPool pool(hosts);
 
@@ -994,31 +906,27 @@ TEST(ApiMacrosTest, HostPoolWeighted)
   }
 }
 
-TEST(ApiMacrosTest, HostPoolPickIsThreadSafe)
-{
+TEST(ApiMacrosTest, HostPoolPickIsThreadSafe) {
   std::vector<HostEntry> hosts = {
-    {"http://host-a.com", 3},
-    {"http://host-b.com", 1},
+      {"http://host-a.com", 3},
+      {"http://host-b.com", 1},
   };
   HostPool pool(hosts);
   std::atomic<int> picks{0};
   std::vector<std::thread> threads;
 
-  for (int t = 0; t < 8; ++t)
-  {
-    threads.emplace_back([&]()
-    {
-      for (int i = 0; i < 1000; ++i)
-      {
+  for (int t = 0; t < 8; ++t) {
+    threads.emplace_back([&]() {
+      for (int i = 0; i < 1000; ++i) {
         const auto& picked = pool.pick();
-        ASSERT_TRUE(picked == "http://host-a.com" || picked == "http://host-b.com");
+        ASSERT_TRUE(picked == "http://host-a.com" ||
+                    picked == "http://host-b.com");
         picks++;
       }
     });
   }
 
-  for (auto& thread : threads)
-  {
+  for (auto& thread : threads) {
     thread.join();
   }
 
@@ -1026,8 +934,7 @@ TEST(ApiMacrosTest, HostPoolPickIsThreadSafe)
 }
 
 // Test multi-host API client
-TEST_F(ClientTest, MultiHostClientPool)
-{
+TEST_F(ClientTest, MultiHostClientPool) {
   auto mc = std::make_shared<MultiHostClient>();
   mc->set_base_url(local_http_echo_server().base_url());
   mc->set_timeout(std::chrono::seconds(10));

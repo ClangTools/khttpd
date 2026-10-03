@@ -1,174 +1,155 @@
 // framework/server.cpp
 #include "server.hpp"
-#include "session/http_session.hpp" // 需要HttpSession
+
 #include <fmt/core.h>
 #include <spdlog/spdlog.h>
+
 #include <boost/filesystem.hpp>
 #include <utility>
 
 #include "io_context_pool.hpp"
+#include "session/http_session.hpp"  // 需要HttpSession
 
-namespace khttpd::framework
-{
-  Server::Server(const tcp::endpoint& endpoint, std::string web_root, int num_threads)
-    : signals_(IoContextPool::instance(num_threads).get_io_context(), SIGINT, SIGTERM),
+namespace khttpd::framework {
+Server::Server(const tcp::endpoint& endpoint, std::string web_root,
+               int num_threads)
+    : signals_(IoContextPool::instance(num_threads).get_io_context(), SIGINT,
+               SIGTERM),
       web_root_(std::move(web_root)),
-      acceptor_(net::make_strand(IoContextPool::instance().get_io_context()))
-  {
-    boost::beast::error_code ec;
+      acceptor_(net::make_strand(IoContextPool::instance().get_io_context())) {
+  boost::beast::error_code ec;
 
-    acceptor_.open(endpoint.protocol(), ec);
-    if (ec)
-    {
-      spdlog::error("Server open error: {}", ec.message());
-      throw std::runtime_error(fmt::format("Failed to open acceptor: {}", ec.message()));
+  acceptor_.open(endpoint.protocol(), ec);
+  if (ec) {
+    spdlog::error("Server open error: {}", ec.message());
+    throw std::runtime_error(
+        fmt::format("Failed to open acceptor: {}", ec.message()));
+  }
+
+  acceptor_.set_option(net::socket_base::reuse_address(true), ec);
+  if (ec) {
+    spdlog::error("Server set_option reuse_address error: {}", ec.message());
+    throw std::runtime_error(
+        fmt::format("Failed to set reuse_address: {}", ec.message()));
+  }
+
+  acceptor_.bind(endpoint, ec);
+  if (ec) {
+    spdlog::error("Server bind error: {}", ec.message());
+    throw std::runtime_error(
+        fmt::format("Failed to bind acceptor: {}", ec.message()));
+  }
+
+  acceptor_.listen(net::socket_base::max_listen_connections, ec);
+  if (ec) {
+    spdlog::error("Server listen error: {}", ec.message());
+    throw std::runtime_error(fmt::format("Failed to listen: {}", ec.message()));
+  }
+
+  if (!web_root_.empty()) {
+    // Pre-compute canonical web root path once (not per-connection).
+    boost::system::error_code path_ec;
+    canonical_web_root_ = boost::filesystem::canonical(web_root_, path_ec);
+    if (path_ec) {
+      spdlog::warn("Cannot canonicalize web_root '{}': {}", web_root_,
+                   path_ec.message());
     }
 
-    acceptor_.set_option(net::socket_base::reuse_address(true), ec);
-    if (ec)
-    {
-      spdlog::error("Server set_option reuse_address error: {}", ec.message());
-      throw std::runtime_error(fmt::format("Failed to set reuse_address: {}", ec.message()));
-    }
-
-    acceptor_.bind(endpoint, ec);
-    if (ec)
-    {
-      spdlog::error("Server bind error: {}", ec.message());
-      throw std::runtime_error(fmt::format("Failed to bind acceptor: {}", ec.message()));
-    }
-
-    acceptor_.listen(net::socket_base::max_listen_connections, ec);
-    if (ec)
-    {
-      spdlog::error("Server listen error: {}", ec.message());
-      throw std::runtime_error(fmt::format("Failed to listen: {}", ec.message()));
-    }
-
-    if (!web_root_.empty())
-    {
-      // Pre-compute canonical web root path once (not per-connection).
-      boost::system::error_code path_ec;
-      canonical_web_root_ = boost::filesystem::canonical(web_root_, path_ec);
-      if (path_ec)
-      {
-        spdlog::warn("Cannot canonicalize web_root '{}': {}", web_root_, path_ec.message());
-      }
-
-      if (!boost::filesystem::exists(web_root_, ec))
-      {
-        spdlog::warn("Web root directory '{}' does not exist. Static file serving may fail. Error: {}",
-                     web_root_, ec.message());
-      }
-      else if (!boost::filesystem::is_directory(web_root_, ec))
-      {
-        spdlog::warn("Web root path '{}' is not a directory. Static file serving may fail. Error: {}",
-                     web_root_, ec.message());
-      }
+    if (!boost::filesystem::exists(web_root_, ec)) {
+      spdlog::warn(
+          "Web root directory '{}' does not exist. Static file serving may "
+          "fail. Error: {}",
+          web_root_, ec.message());
+    } else if (!boost::filesystem::is_directory(web_root_, ec)) {
+      spdlog::warn(
+          "Web root path '{}' is not a directory. Static file serving may "
+          "fail. Error: {}",
+          web_root_, ec.message());
     }
   }
+}
 
-  HttpRouter& Server::get_http_router()
-  {
-    return http_router_;
+HttpRouter& Server::get_http_router() { return http_router_; }
+
+const HttpRouter& Server::get_http_router() const { return http_router_; }
+
+void Server::add_interceptor(std::shared_ptr<Interceptor> interceptor) {
+  http_router_.add_interceptor(interceptor);
+}
+
+WebsocketRouter& Server::get_websocket_router() { return websocket_router_; }
+
+const WebsocketRouter& Server::get_websocket_router() const {
+  return websocket_router_;
+}
+
+tcp::endpoint Server::local_endpoint() const {
+  return acceptor_.local_endpoint();
+}
+
+void Server::set_max_buffered_request_body_size(std::uint64_t bytes) {
+  max_buffered_request_body_size_.store(bytes, std::memory_order_relaxed);
+}
+
+std::uint64_t Server::get_max_buffered_request_body_size() const {
+  return max_buffered_request_body_size_.load(std::memory_order_relaxed);
+}
+
+void Server::run() {
+  spdlog::info("Server listening on {}:{}",
+               acceptor_.local_endpoint().address().to_string(),
+               acceptor_.local_endpoint().port());
+
+  signals_.async_wait(
+      beast::bind_front_handler(&Server::handle_signal, shared_from_this()));
+
+  do_accept();
+
+  IoContextPool::instance().get_io_context().run();
+
+  spdlog::info("Server workers stopped.");
+}
+
+void Server::stop() {
+  boost::beast::error_code ec;
+  acceptor_.close(ec);
+  if (ec) {
+    spdlog::error("Server acceptor close error: {}", ec.message());
   }
 
-  const HttpRouter& Server::get_http_router() const
-  {
-    return http_router_;
-  }
+  IoContextPool::instance().stop();
+  spdlog::info("Server stopped.");
+}
 
-  void Server::add_interceptor(std::shared_ptr<Interceptor> interceptor)
-  {
-    http_router_.add_interceptor(interceptor);
-  }
-
-  WebsocketRouter& Server::get_websocket_router()
-  {
-    return websocket_router_;
-  }
-
-  const WebsocketRouter& Server::get_websocket_router() const
-  {
-    return websocket_router_;
-  }
-
-  tcp::endpoint Server::local_endpoint() const
-  {
-    return acceptor_.local_endpoint();
-  }
-
-  void Server::set_max_buffered_request_body_size(std::uint64_t bytes)
-  {
-    max_buffered_request_body_size_.store(bytes, std::memory_order_relaxed);
-  }
-
-  std::uint64_t Server::get_max_buffered_request_body_size() const
-  {
-    return max_buffered_request_body_size_.load(std::memory_order_relaxed);
-  }
-
-  void Server::run()
-  {
-    spdlog::info("Server listening on {}:{}", acceptor_.local_endpoint().address().to_string(),
-                 acceptor_.local_endpoint().port());
-
-    signals_.async_wait(beast::bind_front_handler(&Server::handle_signal, shared_from_this()));
-
-    do_accept();
-
-    IoContextPool::instance().get_io_context().run();
-
-    spdlog::info("Server workers stopped.");
-  }
-
-  void Server::stop()
-  {
-    boost::beast::error_code ec;
-    acceptor_.close(ec);
-    if (ec)
-    {
-      spdlog::error("Server acceptor close error: {}", ec.message());
-    }
-
-    IoContextPool::instance().stop();
-    spdlog::info("Server stopped.");
-  }
-
-  void Server::do_accept()
-  {
-    acceptor_.async_accept(
+void Server::do_accept() {
+  acceptor_.async_accept(
       net::make_strand(IoContextPool::instance().get_io_context()),
       beast::bind_front_handler(&Server::on_accept, shared_from_this()));
+}
+
+void Server::on_accept(boost::beast::error_code ec, tcp::socket socket) {
+  if (ec) {
+    if (ec != boost::system::errc::operation_canceled) {
+      spdlog::error("Server on_accept error: {}", ec.message());
+    }
+  } else {
+    std::make_shared<HttpSession>(
+        std::move(socket), http_router_, websocket_router_, web_root_,
+        canonical_web_root_, get_max_buffered_request_body_size())
+        ->run();
   }
 
-  void Server::on_accept(boost::beast::error_code ec, tcp::socket socket)
-  {
-    if (ec)
-    {
-      if (ec != boost::system::errc::operation_canceled)
-      {
-        spdlog::error("Server on_accept error: {}", ec.message());
-      }
-    }
-    else
-    {
-      std::make_shared<HttpSession>(std::move(socket), http_router_, websocket_router_, web_root_,
-                                    canonical_web_root_, get_max_buffered_request_body_size())->run();
-    }
-
-    if (acceptor_.is_open())
-    {
-      do_accept();
-    }
+  if (acceptor_.is_open()) {
+    do_accept();
   }
+}
 
-  void Server::handle_signal(const boost::beast::error_code& error, int signal_number)
-  {
-    if (!error)
-    {
-      spdlog::info("Received signal {}, shutting down gracefully...", signal_number);
-      stop();
-    }
+void Server::handle_signal(const boost::beast::error_code& error,
+                           int signal_number) {
+  if (!error) {
+    spdlog::info("Received signal {}, shutting down gracefully...",
+                 signal_number);
+    stop();
   }
-} // namespace khttpd::framework
+}
+}  // namespace khttpd::framework

@@ -1,9 +1,12 @@
 #include "framework/context/websocket_context.hpp"
-#include "framework/websocket/websocket_session.hpp"
-#include "framework/router/websocket_router.hpp"
+
 #include <gtest/gtest.h>
+
 #include <boost/asio/io_context.hpp>
 #include <memory>
+
+#include "framework/router/websocket_router.hpp"
+#include "framework/websocket/websocket_session.hpp"
 
 namespace beast = boost::beast;
 namespace ws = beast::websocket;
@@ -12,50 +15,39 @@ using tcp = boost::asio::ip::tcp;
 namespace khttpd_fw = khttpd::framework;
 
 // Minimal mock session for WebsocketContext testing
-class SimpleMockWsSession : public khttpd_fw::WebsocketSession
-{
-public:
-  static net::io_context& get_dummy_ioc()
-  {
+class SimpleMockWsSession : public khttpd_fw::WebsocketSession {
+ public:
+  static net::io_context& get_dummy_ioc() {
     static net::io_context ioc;
     return ioc;
   }
-  static khttpd_fw::WebsocketRouter& get_dummy_router()
-  {
+  static khttpd_fw::WebsocketRouter& get_dummy_router() {
     static khttpd_fw::WebsocketRouter router;
     return router;
   }
 
   SimpleMockWsSession()
-    : WebsocketSession(tcp::socket(get_dummy_ioc()), get_dummy_router(), "/mock")
-  {
-  }
+      : WebsocketSession(tcp::socket(get_dummy_ioc()), get_dummy_router(),
+                         "/mock") {}
 
   std::string last_sent;
   bool last_sent_is_text = false;
 
-  void send_message(const std::string& msg, bool is_text) override
-  {
+  void send_message(const std::string& msg, bool is_text) override {
     last_sent = msg;
     last_sent_is_text = is_text;
   }
 };
 
-class WebsocketContextTest : public ::testing::Test
-{
-protected:
+class WebsocketContextTest : public ::testing::Test {
+ protected:
   std::shared_ptr<SimpleMockWsSession> session;
 
-  void SetUp() override
-  {
-    session = std::make_shared<SimpleMockWsSession>();
-  }
+  void SetUp() override { session = std::make_shared<SimpleMockWsSession>(); }
 };
 
-TEST_F(WebsocketContextTest, Attributes)
-{
-  khttpd_fw::WebsocketContext ctx(
-    session, "test message", true, "/test");
+TEST_F(WebsocketContextTest, Attributes) {
+  khttpd_fw::WebsocketContext ctx(session, "test message", true, "/test");
 
   ctx.set_attribute("user", std::string("alice"));
   ctx.set_attribute("count", 42);
@@ -77,10 +69,8 @@ TEST_F(WebsocketContextTest, Attributes)
   ASSERT_FALSE(wrong.has_value());
 }
 
-TEST_F(WebsocketContextTest, SendWithExpiredSession)
-{
-  khttpd_fw::WebsocketContext ctx(
-    session, "hello", true, "/test");
+TEST_F(WebsocketContextTest, SendWithExpiredSession) {
+  khttpd_fw::WebsocketContext ctx(session, "hello", true, "/test");
 
   // Send with valid session
   ctx.send("echo back");
@@ -92,18 +82,16 @@ TEST_F(WebsocketContextTest, SendWithExpiredSession)
   // Send with expired session should not crash
   ctx.send("should not crash");
   // last_sent remains unchanged since session is gone
-  ASSERT_EQ(ctx.message, "hello"); // Context still has original message
+  ASSERT_EQ(ctx.message, "hello");  // Context still has original message
 }
 
-TEST_F(WebsocketContextTest, ErrorContext)
-{
+TEST_F(WebsocketContextTest, ErrorContext) {
   beast::error_code test_ec = beast::error::timeout;
 
-  khttpd_fw::WebsocketContext ctx(
-    session, "/test", test_ec);
+  khttpd_fw::WebsocketContext ctx(session, "/test", test_ec);
 
   ASSERT_EQ(ctx.error_code, test_ec);
   ASSERT_EQ(ctx.path, "/test");
-  ASSERT_EQ(ctx.is_text, false); // Error context defaults to false
-  ASSERT_TRUE(ctx.message.empty()); // Message is default constructed empty
+  ASSERT_EQ(ctx.is_text, false);     // Error context defaults to false
+  ASSERT_TRUE(ctx.message.empty());  // Message is default constructed empty
 }

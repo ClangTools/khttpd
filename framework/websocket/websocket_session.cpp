@@ -1,314 +1,302 @@
 // framework/websocket/websocket_session.cpp
 #include "websocket_session.hpp"
-#include "context/websocket_context.hpp"
+
 #include <spdlog/spdlog.h>
+
 #include <boost/uuid/uuid_io.hpp>
 
-namespace khttpd::framework
-{
-  std::mutex WebsocketSession::m_sessions_mutex{};
-  std::map<std::string, std::shared_ptr<WebsocketSession>> WebsocketSession::m_sessions_id_{};
-  std::mutex WebsocketSession::m_gen_mutex{};
-  boost::uuids::random_generator WebsocketSession::gen{};
+#include "context/websocket_context.hpp"
 
-  WebsocketSession::WebsocketSession(tcp::socket&& socket, WebsocketRouter& ws_router,
-                                     const std::string& initial_path)
+namespace khttpd::framework {
+std::mutex WebsocketSession::m_sessions_mutex{};
+std::map<std::string, std::shared_ptr<WebsocketSession>>
+    WebsocketSession::m_sessions_id_{};
+std::mutex WebsocketSession::m_gen_mutex{};
+boost::uuids::random_generator WebsocketSession::gen{};
+
+WebsocketSession::WebsocketSession(tcp::socket&& socket,
+                                   WebsocketRouter& ws_router,
+                                   const std::string& initial_path)
     : ws_(std::move(socket)),
       websocket_router_(ws_router),
-      initial_path_(initial_path)
+      initial_path_(initial_path) {
   {
-    {
-      std::unique_lock<std::mutex> lock(m_gen_mutex);
-      id = boost::uuids::to_string(gen());
+    std::unique_lock<std::mutex> lock(m_gen_mutex);
+    id = boost::uuids::to_string(gen());
+  }
+  ws_.read_message_max(32 * 1024 * 1024);
+  ws_.set_option(ws::stream_base::decorator([](ws::response_type& res) {
+    res.set(http::field::server,
+            std::string(BOOST_BEAST_VERSION_STRING) + " khttpd-websocket");
+  }));
+}
+
+void WebsocketSession::on_handshake(beast::error_code ec) {
+  if (ec) {
+    spdlog::error("WebSocket handshake error for path '{}': {}", initial_path_,
+                  ec.message());
+    do_close(ec);
+    return;
+  }
+  spdlog::debug("WebSocket handshake successful for path: {}", initial_path_);
+
+  std::weak_ptr<WebsocketSession> weak = shared_from_this();
+  ws_.control_callback([weak](ws::frame_type type, beast::string_view payload) {
+    const auto self = weak.lock();
+    if (!self) return;
+    WebsocketFrameType frame_type;
+    switch (type) {
+      case ws::frame_type::ping:
+        frame_type = WebsocketFrameType::ping;
+        break;
+      case ws::frame_type::pong:
+        frame_type = WebsocketFrameType::pong;
+        break;
+      case ws::frame_type::close:
+        frame_type = WebsocketFrameType::close;
+        break;
     }
-    ws_.read_message_max(32 * 1024 * 1024);
-    ws_.set_option(ws::stream_base::decorator([](ws::response_type& res)
-    {
-      res.set(http::field::server, std::string(BOOST_BEAST_VERSION_STRING) + " khttpd-websocket");
-    }));
+    WebsocketContext ctx(self, self->initial_path_);
+    ctx.frame.type = frame_type;
+    ctx.frame.payload = std::string(payload);
+    if (type == ws::frame_type::close) {
+      const auto reason = self->ws_.reason();
+      ctx.frame.close_code = static_cast<uint16_t>(reason.code);
+      ctx.frame.close_reason = reason.reason.c_str();
+    }
+    self->websocket_router_.dispatch_message(self->initial_path_, ctx);
+  });
+
+  WebsocketContext open_ctx(shared_from_this(), initial_path_);
+  {
+    std::unique_lock<std::mutex> lock{m_sessions_mutex};
+    m_sessions_id_[id] = shared_from_this();
+  }
+  websocket_router_.dispatch_open(initial_path_, open_ctx);
+
+  do_read();
+}
+
+void WebsocketSession::do_read() {
+  ws_.async_read(buffer_, beast::bind_front_handler(&WebsocketSession::on_read,
+                                                    shared_from_this()));
+}
+
+void WebsocketSession::on_read(beast::error_code ec,
+                               std::size_t bytes_transferred) {
+  boost::ignore_unused(bytes_transferred);
+
+  if (ec == ws::error::closed) {
+    spdlog::debug("WebSocket connection for path '{}' closed by client.",
+                  initial_path_);
+    do_close(ec);
+    return;
+  }
+  if (ec) {
+    spdlog::error("WebSocket read error for path '{}': {}", initial_path_,
+                  ec.message());
+    do_close(ec);
+    return;
   }
 
+  std::string received_message = beast::buffers_to_string(buffer_.data());
+  bool is_text = ws_.got_text();
 
-  void WebsocketSession::on_handshake(beast::error_code ec)
-  {
-    if (ec)
-    {
-      spdlog::error("WebSocket handshake error for path '{}': {}", initial_path_, ec.message());
-      do_close(ec);
+  spdlog::debug("Received WS message on path '{}': {}", initial_path_,
+                received_message);
+
+  buffer_.consume(buffer_.size());
+
+  WebsocketContext message_ctx(shared_from_this(), received_message, is_text,
+                               initial_path_);
+  websocket_router_.dispatch_message(initial_path_, message_ctx);
+
+  do_read();
+}
+
+void WebsocketSession::send_message(const std::string& msg, bool is_text_msg) {
+  send_frame(
+      {is_text_msg ? WebsocketFrameType::text : WebsocketFrameType::binary,
+       msg});
+}
+
+void WebsocketSession::send_frame(WebsocketFrame frame) {
+  auto self = shared_from_this();
+  net::post(ws_.get_executor(), [self, frame = std::move(frame)]() mutable {
+    if (self->closed_) {
       return;
     }
-    spdlog::debug("WebSocket handshake successful for path: {}", initial_path_);
-
-    std::weak_ptr<WebsocketSession> weak = shared_from_this();
-    ws_.control_callback([weak](ws::frame_type type, beast::string_view payload)
-    {
-      const auto self = weak.lock();
-      if (!self) return;
-      WebsocketFrameType frame_type;
-      switch (type)
-      {
-        case ws::frame_type::ping: frame_type = WebsocketFrameType::ping; break;
-        case ws::frame_type::pong: frame_type = WebsocketFrameType::pong; break;
-        case ws::frame_type::close: frame_type = WebsocketFrameType::close; break;
-      }
-      WebsocketContext ctx(self, self->initial_path_);
-      ctx.frame.type = frame_type;
-      ctx.frame.payload = std::string(payload);
-      if (type == ws::frame_type::close)
-      {
-        const auto reason = self->ws_.reason();
-        ctx.frame.close_code = static_cast<uint16_t>(reason.code);
-        ctx.frame.close_reason = reason.reason.c_str();
-      }
-      self->websocket_router_.dispatch_message(self->initial_path_, ctx);
-    });
-
-    WebsocketContext open_ctx(shared_from_this(), initial_path_);
-    {
-      std::unique_lock<std::mutex> lock{m_sessions_mutex};
-      m_sessions_id_[id] = shared_from_this();
+    self->write_queue_.push(std::move(frame));
+    if (!self->writing_) {
+      self->writing_ = true;
+      self->do_write_next();
     }
-    websocket_router_.dispatch_open(initial_path_, open_ctx);
+  });
+}
 
-    do_read();
-  }
-
-  void WebsocketSession::do_read()
-  {
-    ws_.async_read(buffer_,
-                   beast::bind_front_handler(&WebsocketSession::on_read, shared_from_this()));
-  }
-
-  void WebsocketSession::on_read(beast::error_code ec, std::size_t bytes_transferred)
-  {
-    boost::ignore_unused(bytes_transferred);
-
-    if (ec == ws::error::closed)
-    {
-      spdlog::debug("WebSocket connection for path '{}' closed by client.", initial_path_);
-      do_close(ec);
-      return;
-    }
-    if (ec)
-    {
-      spdlog::error("WebSocket read error for path '{}': {}", initial_path_, ec.message());
-      do_close(ec);
-      return;
-    }
-
-    std::string received_message = beast::buffers_to_string(buffer_.data());
-    bool is_text = ws_.got_text();
-
-    spdlog::debug("Received WS message on path '{}': {}", initial_path_, received_message);
-
-    buffer_.consume(buffer_.size());
-
-    WebsocketContext message_ctx(shared_from_this(), received_message, is_text, initial_path_);
-    websocket_router_.dispatch_message(initial_path_, message_ctx);
-
-    do_read();
-  }
-
-  void WebsocketSession::send_message(const std::string& msg, bool is_text_msg)
-  {
-    send_frame({is_text_msg ? WebsocketFrameType::text : WebsocketFrameType::binary, msg});
-  }
-
-  void WebsocketSession::send_frame(WebsocketFrame frame)
-  {
-    auto self = shared_from_this();
-    net::post(ws_.get_executor(), [self, frame = std::move(frame)]() mutable
-    {
-      if (self->closed_)
-      {
-        return;
-      }
-      self->write_queue_.push(std::move(frame));
-      if (!self->writing_)
-      {
-        self->writing_ = true;
-        self->do_write_next();
-      }
-    });
-  }
-
-  void WebsocketSession::do_write_next()
-  {
-    if (closed_)
-    {
-      while (!write_queue_.empty())
-      {
-        write_queue_.pop();
-      }
-      writing_ = false;
-      if (close_pending_)
-      {
-        close_pending_ = false;
-        close_stream();
-      }
-      return;
-    }
-
-    if (write_queue_.empty())
-    {
-      writing_ = false;
-      if (close_pending_)
-      {
-        close_pending_ = false;
-        close_stream();
-      }
-      return;
-    }
-
-    auto frame = std::move(write_queue_.front());
-    write_queue_.pop();
-    if (frame.type == WebsocketFrameType::close)
-    {
-      closed_ = true;
-      ws_.async_close({static_cast<ws::close_code>(frame.close_code), frame.close_reason},
-                      [self = shared_from_this()](beast::error_code ec) { self->on_write(ec, 0); });
-      return;
-    }
-    if (frame.type == WebsocketFrameType::ping || frame.type == WebsocketFrameType::pong)
-    {
-      const ws::ping_data payload(frame.payload);
-      if (frame.type == WebsocketFrameType::ping)
-        ws_.async_ping(payload, [self = shared_from_this()](beast::error_code ec) { self->on_write(ec, 0); });
-      else
-        ws_.async_pong(payload, [self = shared_from_this()](beast::error_code ec) { self->on_write(ec, 0); });
-      return;
-    }
-    auto ss = std::make_shared<const std::string>(std::move(frame.payload));
-
-    ws_.text(frame.type == WebsocketFrameType::text);
-
-    if (ss->length() < auto_fragment_threshold_)
-    {
-      ws_.async_write(net::buffer(*ss),
-                      beast::bind_front_handler(&WebsocketSession::on_write, shared_from_this()));
-    }
-    else
-    {
-      auto buffer_sequence_ptr = std::make_shared<std::vector<net::const_buffer>>();
-      buffer_sequence_ptr->reserve(ss->length() / fragment_size_ + 1);
-
-      size_t offset = 0;
-      while (offset < ss->length())
-      {
-        size_t current_chunk_size = std::min(fragment_size_, ss->length() - offset);
-        buffer_sequence_ptr->emplace_back(ss->data() + offset, current_chunk_size);
-        offset += current_chunk_size;
-      }
-
-      ws_.async_write(
-        *buffer_sequence_ptr,
-        [ss, buffer_sequence_ptr, self = shared_from_this()](beast::error_code ec, std::size_t bytes)
-        {
-          self->on_write(ec, bytes);
-        }
-      );
-    }
-  }
-
-  bool WebsocketSession::send_message(const std::string& id, const std::string& msg, bool is_text)
-  {
-    return send_message(std::vector<std::string>{id}, msg, is_text) > 0;
-  }
-
-  size_t WebsocketSession::send_message(const std::vector<std::string>& ids, const std::string& msg, bool is_text)
-  {
-    // Collect target session pointers under lock, then release before sending
-    std::vector<std::shared_ptr<WebsocketSession>> targets;
-    {
-      std::unique_lock<std::mutex> lock{m_sessions_mutex};
-      for (const auto& id : ids)
-      {
-        auto item = m_sessions_id_.find(id);
-        if (item == m_sessions_id_.end())
-        {
-          continue;
-        }
-        targets.push_back(item->second);
-      }
-    }
-    // Send messages outside the lock
-    size_t count = 0;
-    for (const auto& session : targets)
-    {
-      session->send_message(msg, is_text);
-      count++;
-    }
-    return count;
-  }
-
-  void WebsocketSession::on_write(beast::error_code ec, std::size_t bytes_transferred)
-  {
-    boost::ignore_unused(bytes_transferred);
-
-    if (ec)
-    {
-      spdlog::error("WebSocket write error for path '{}': {}", initial_path_, ec.message());
-      writing_ = false;
-      do_close(ec);
-      return;
-    }
-    do_write_next();
-  }
-
-  void WebsocketSession::close_stream()
-  {
-    if (!ws_.is_open())
-    {
-      return;
-    }
-    ws_.async_close(ws::close_code::normal,
-                    [self = shared_from_this()](beast::error_code close_ec)
-                    {
-                      if (close_ec && close_ec != boost::asio::error::operation_aborted)
-                      {
-                        spdlog::error("WebSocket close error for path '{}': {}",
-                                      self->initial_path_, close_ec.message());
-                      }
-                    });
-  }
-
-  void WebsocketSession::do_close(beast::error_code ec)
-  {
-    if (closed_)
-    {
-      return;
-    }
-    closed_ = true;
-    while (!write_queue_.empty())
-    {
+void WebsocketSession::do_write_next() {
+  if (closed_) {
+    while (!write_queue_.empty()) {
       write_queue_.pop();
     }
-
-    {
-      std::unique_lock<std::mutex> lock{m_sessions_mutex};
-      m_sessions_id_.erase(id);
+    writing_ = false;
+    if (close_pending_) {
+      close_pending_ = false;
+      close_stream();
     }
+    return;
+  }
 
-    if (ec && ec != ws::error::closed && ec != boost::asio::error::eof)
-    {
-      WebsocketContext error_ctx(shared_from_this(), initial_path_, ec);
-      websocket_router_.dispatch_error(initial_path_, error_ctx);
+  if (write_queue_.empty()) {
+    writing_ = false;
+    if (close_pending_) {
+      close_pending_ = false;
+      close_stream();
     }
+    return;
+  }
+
+  auto frame = std::move(write_queue_.front());
+  write_queue_.pop();
+  if (frame.type == WebsocketFrameType::close) {
+    closed_ = true;
+    ws_.async_close(
+        {static_cast<ws::close_code>(frame.close_code), frame.close_reason},
+        [self = shared_from_this()](beast::error_code ec) {
+          self->on_write(ec, 0);
+        });
+    return;
+  }
+  if (frame.type == WebsocketFrameType::ping ||
+      frame.type == WebsocketFrameType::pong) {
+    const ws::ping_data payload(frame.payload);
+    if (frame.type == WebsocketFrameType::ping)
+      ws_.async_ping(payload,
+                     [self = shared_from_this()](beast::error_code ec) {
+                       self->on_write(ec, 0);
+                     });
     else
-    {
-      WebsocketContext close_ctx(shared_from_this(), initial_path_, ec);
-      const auto reason = ws_.reason();
-      close_ctx.frame.type = WebsocketFrameType::close;
-      close_ctx.frame.close_code = static_cast<uint16_t>(reason.code);
-      close_ctx.frame.close_reason = reason.reason.c_str();
-      websocket_router_.dispatch_close(initial_path_, close_ctx);
+      ws_.async_pong(payload,
+                     [self = shared_from_this()](beast::error_code ec) {
+                       self->on_write(ec, 0);
+                     });
+    return;
+  }
+  auto ss = std::make_shared<const std::string>(std::move(frame.payload));
+
+  ws_.text(frame.type == WebsocketFrameType::text);
+
+  if (ss->length() < auto_fragment_threshold_) {
+    ws_.async_write(net::buffer(*ss),
+                    beast::bind_front_handler(&WebsocketSession::on_write,
+                                              shared_from_this()));
+  } else {
+    auto buffer_sequence_ptr =
+        std::make_shared<std::vector<net::const_buffer>>();
+    buffer_sequence_ptr->reserve(ss->length() / fragment_size_ + 1);
+
+    size_t offset = 0;
+    while (offset < ss->length()) {
+      size_t current_chunk_size =
+          std::min(fragment_size_, ss->length() - offset);
+      buffer_sequence_ptr->emplace_back(ss->data() + offset,
+                                        current_chunk_size);
+      offset += current_chunk_size;
     }
 
-    if (writing_)
-    {
-      close_pending_ = true;
-      return;
-    }
-    close_stream();
+    ws_.async_write(*buffer_sequence_ptr,
+                    [ss, buffer_sequence_ptr, self = shared_from_this()](
+                        beast::error_code ec, std::size_t bytes) {
+                      self->on_write(ec, bytes);
+                    });
   }
 }
+
+bool WebsocketSession::send_message(const std::string& id,
+                                    const std::string& msg, bool is_text) {
+  return send_message(std::vector<std::string>{id}, msg, is_text) > 0;
+}
+
+size_t WebsocketSession::send_message(const std::vector<std::string>& ids,
+                                      const std::string& msg, bool is_text) {
+  // Collect target session pointers under lock, then release before sending
+  std::vector<std::shared_ptr<WebsocketSession>> targets;
+  {
+    std::unique_lock<std::mutex> lock{m_sessions_mutex};
+    for (const auto& id : ids) {
+      auto item = m_sessions_id_.find(id);
+      if (item == m_sessions_id_.end()) {
+        continue;
+      }
+      targets.push_back(item->second);
+    }
+  }
+  // Send messages outside the lock
+  size_t count = 0;
+  for (const auto& session : targets) {
+    session->send_message(msg, is_text);
+    count++;
+  }
+  return count;
+}
+
+void WebsocketSession::on_write(beast::error_code ec,
+                                std::size_t bytes_transferred) {
+  boost::ignore_unused(bytes_transferred);
+
+  if (ec) {
+    spdlog::error("WebSocket write error for path '{}': {}", initial_path_,
+                  ec.message());
+    writing_ = false;
+    do_close(ec);
+    return;
+  }
+  do_write_next();
+}
+
+void WebsocketSession::close_stream() {
+  if (!ws_.is_open()) {
+    return;
+  }
+  ws_.async_close(ws::close_code::normal, [self = shared_from_this()](
+                                              beast::error_code close_ec) {
+    if (close_ec && close_ec != boost::asio::error::operation_aborted) {
+      spdlog::error("WebSocket close error for path '{}': {}",
+                    self->initial_path_, close_ec.message());
+    }
+  });
+}
+
+void WebsocketSession::do_close(beast::error_code ec) {
+  if (closed_) {
+    return;
+  }
+  closed_ = true;
+  while (!write_queue_.empty()) {
+    write_queue_.pop();
+  }
+
+  {
+    std::unique_lock<std::mutex> lock{m_sessions_mutex};
+    m_sessions_id_.erase(id);
+  }
+
+  if (ec && ec != ws::error::closed && ec != boost::asio::error::eof) {
+    WebsocketContext error_ctx(shared_from_this(), initial_path_, ec);
+    websocket_router_.dispatch_error(initial_path_, error_ctx);
+  } else {
+    WebsocketContext close_ctx(shared_from_this(), initial_path_, ec);
+    const auto reason = ws_.reason();
+    close_ctx.frame.type = WebsocketFrameType::close;
+    close_ctx.frame.close_code = static_cast<uint16_t>(reason.code);
+    close_ctx.frame.close_reason = reason.reason.c_str();
+    websocket_router_.dispatch_close(initial_path_, close_ctx);
+  }
+
+  if (writing_) {
+    close_pending_ = true;
+    return;
+  }
+  close_stream();
+}
+}  // namespace khttpd::framework

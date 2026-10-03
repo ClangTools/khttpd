@@ -1,21 +1,23 @@
 #include <gtest/gtest.h>
-#include <memory>
-#include <mutex>
-#include <condition_variable>
+
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
+#include <memory>
+#include <mutex>
 
 // 包含你之前的头文件
-#include "cron/CronJob.hpp"
-#include "io_context_pool.hpp"
-
 #include <gtest/gtest.h>
-#include <memory>
-#include <mutex>
-#include <condition_variable>
+
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
+#include <memory>
+#include <mutex>
 #include <thread>
+
+#include "cron/CronJob.hpp"
+#include "io_context_pool.hpp"
 
 // 引入你的头文件
 #include "cron/CronScheduler.hpp"
@@ -25,17 +27,12 @@ using namespace std::chrono_literals;
 using namespace khttpd::framework;
 
 // --- 测试用的辅助类 ---
-class TestableCronJob : public CronJob
-{
-public:
-  TestableCronJob(const std::string& expr)
-    : CronJob(expr), run_count_(0)
-  {
-  }
+class TestableCronJob : public CronJob {
+ public:
+  TestableCronJob(const std::string& expr) : CronJob(expr), run_count_(0) {}
 
   // 实现 run 方法
-  void run() override
-  {
+  void run() override {
     // 1. 增加计数
     run_count_++;
 
@@ -49,21 +46,16 @@ public:
 
   // 辅助方法：等待任务执行 n 次
   // 返回 true 表示在超时前完成了任务，false 表示超时
-  bool wait_for_runs(int expected_count, std::chrono::milliseconds timeout)
-  {
+  bool wait_for_runs(int expected_count, std::chrono::milliseconds timeout) {
     std::unique_lock<std::mutex> lock(mutex_);
-    return cv_.wait_for(lock, timeout, [this, expected_count]()
-    {
+    return cv_.wait_for(lock, timeout, [this, expected_count]() {
       return run_count_ >= expected_count;
     });
   }
 
-  int get_run_count() const
-  {
-    return run_count_;
-  }
+  int get_run_count() const { return run_count_; }
 
-private:
+ private:
   std::atomic<int> run_count_;
   std::mutex mutex_;
   std::condition_variable cv_;
@@ -71,37 +63,33 @@ private:
 
 // --- 测试套件 ---
 
-class CronJobTest : public ::testing::Test
-{
-protected:
-  static void SetUpTestSuite()
-  {
+class CronJobTest : public ::testing::Test {
+ protected:
+  static void SetUpTestSuite() {
     // 确保 IoContextPool 至少有一个线程在运行
     // 注意：单例模式下，这个池会在所有测试间共享
     IoContextPool::instance(1);
   }
 
-  static void TearDownTestSuite()
-  {
+  static void TearDownTestSuite() {
     // 测试结束后停止池（可选，视具体需求而定）
     // IoContextPool::instance().stop();
   }
 };
 
 // 测试 1: 验证无效的 Cron 表达式会抛出异常
-TEST_F(CronJobTest, ThrowsOnInvalidExpression)
-{
+TEST_F(CronJobTest, ThrowsOnInvalidExpression) {
   // 这是一个错误的表达式 (只有 5 个字段，或者是乱码)
   std::string invalid_expr = "invalid cron string";
 
-  EXPECT_THROW({
-               auto job = std::make_shared<TestableCronJob>(invalid_expr);
-               }, std::runtime_error); // 这里的异常类型取决于 croncpp 具体抛出什么，通常是 std::runtime_error 或 croncpp::cron_exception
+  EXPECT_THROW(
+      { auto job = std::make_shared<TestableCronJob>(invalid_expr); },
+      std::runtime_error);  // 这里的异常类型取决于 croncpp 具体抛出什么，通常是
+                            // std::runtime_error 或 croncpp::cron_exception
 }
 
 // 测试 2: 验证任务是否能被调度和执行
-TEST_F(CronJobTest, RunsScheduleCorrectly)
-{
+TEST_F(CronJobTest, RunsScheduleCorrectly) {
   // 设置为每秒执行一次 ("* * * * * *")
   // 注意：croncpp 能够处理秒级
   auto job = std::make_shared<TestableCronJob>("* * * * * *");
@@ -119,8 +107,7 @@ TEST_F(CronJobTest, RunsScheduleCorrectly)
 }
 
 // 测试 3: 验证 Stop 后不再执行
-TEST_F(CronJobTest, StopPreventsFurtherExecution)
-{
+TEST_F(CronJobTest, StopPreventsFurtherExecution) {
   auto job = std::make_shared<TestableCronJob>("* * * * * *");
   job->start();
 
@@ -142,8 +129,7 @@ TEST_F(CronJobTest, StopPreventsFurtherExecution)
 }
 
 // 测试 4: 多个任务并发
-TEST_F(CronJobTest, MultipleJobs)
-{
+TEST_F(CronJobTest, MultipleJobs) {
   auto job1 = std::make_shared<TestableCronJob>("* * * * * *");
   auto job2 = std::make_shared<TestableCronJob>("* * * * * *");
 
@@ -158,109 +144,83 @@ TEST_F(CronJobTest, MultipleJobs)
   job2->stop();
 }
 
-
 // --- 辅助类：用于线程安全地计数和等待 ---
-class AsyncCounter
-{
-public:
-  void tick()
-  {
+class AsyncCounter {
+ public:
+  void tick() {
     run_count_++;
     cv_.notify_all();
   }
 
-  int get_count() const
-  {
-    return run_count_;
-  }
+  int get_count() const { return run_count_; }
 
   // 等待至少达到 expected_count 次执行
   // 返回 true 表示成功，false 表示超时
-  bool wait_for_at_least(int expected_count, std::chrono::milliseconds timeout)
-  {
+  bool wait_for_at_least(int expected_count,
+                         std::chrono::milliseconds timeout) {
     std::unique_lock<std::mutex> lock(mtx_);
-    return cv_.wait_for(lock, timeout, [this, expected_count]()
-    {
+    return cv_.wait_for(lock, timeout, [this, expected_count]() {
       return run_count_ >= expected_count;
     });
   }
 
   // 等待指定的时间，确认在此期间计数器是否变化（用于验证 Stop 和 Delay）
   // 如果计数器在 timeout 内没有增加，返回 true
-  bool ensure_no_execution_for(std::chrono::milliseconds duration)
-  {
+  bool ensure_no_execution_for(std::chrono::milliseconds duration) {
     int initial = run_count_;
     std::unique_lock<std::mutex> lock(mtx_);
-    // wait_for 返回 false 表示超时（即条件一直不满足），这意味着没有达到 initial + 1
-    // 所以如果 wait_for 返回 false，说明没有执行，是我们想要的结果
-    bool triggered = cv_.wait_for(lock, duration, [this, initial]()
-    {
-      return run_count_ > initial;
-    });
+    // wait_for 返回 false 表示超时（即条件一直不满足），这意味着没有达到
+    // initial + 1 所以如果 wait_for 返回 false，说明没有执行，是我们想要的结果
+    bool triggered = cv_.wait_for(
+        lock, duration, [this, initial]() { return run_count_ > initial; });
     return !triggered;
   }
 
-private:
+ private:
   std::atomic<int> run_count_{0};
   std::mutex mtx_;
   std::condition_variable cv_;
 };
 
 // --- 测试套件 ---
-class CronSchedulerTest : public ::testing::Test
-{
-protected:
-  static void SetUpTestSuite()
-  {
+class CronSchedulerTest : public ::testing::Test {
+ protected:
+  static void SetUpTestSuite() {
     // 初始化线程池，使用 2 个线程以支持并发测试
     IoContextPool::instance(2);
   }
 
-  static void TearDownTestSuite()
-  {
-    IoContextPool::instance().stop();
-  }
+  static void TearDownTestSuite() { IoContextPool::instance().stop(); }
 
-  void SetUp() override
-  {
-    CronScheduler::instance().stop_all();
-  }
+  void SetUp() override { CronScheduler::instance().stop_all(); }
 
-  void TearDown() override
-  {
-    CronScheduler::instance().stop_all();
-  }
+  void TearDown() override { CronScheduler::instance().stop_all(); }
 };
 
 // 测试 1: 验证通过 Scheduler 调度的基础 Lambda 任务能正常运行
-TEST_F(CronSchedulerTest, ScheduleBasic)
-{
+TEST_F(CronSchedulerTest, ScheduleBasic) {
   auto counter = std::make_shared<AsyncCounter>();
 
   // 每秒执行一次
   // 注意：持有返回的 job 指针，否则测试函数结束时如果 pool 还在跑，任务也会跑
-  auto job = CronScheduler::instance().schedule("* * * * * *", [counter]()
-  {
-    counter->tick();
-  });
+  auto job = CronScheduler::instance().schedule(
+      "* * * * * *", [counter]() { counter->tick(); });
 
   // 等待至少执行 1 次，超时时间 2.5 秒
-  ASSERT_TRUE(counter->wait_for_at_least(1, 2500ms)) << "Job failed to run within timeout";
+  ASSERT_TRUE(counter->wait_for_at_least(1, 2500ms))
+      << "Job failed to run within timeout";
 
   // 停止任务
   job->stop();
 }
 
 // 测试 2: 验证手动停止 (Stop) 功能，并测试之前的竞态条件修复
-TEST_F(CronSchedulerTest, ScheduleStop)
-{
+TEST_F(CronSchedulerTest, ScheduleStop) {
   auto counter = std::make_shared<AsyncCounter>();
 
   // 极高频任务（每秒）
-  auto job = CronScheduler::instance().schedule("* * * * * *", [counter]()
-  {
-    counter->tick();
-  });
+  auto job = CronScheduler::instance().schedule(
+      "* * * * * *", [counter]() { counter->tick(); });
 
   // 1. 确保它跑起来了
   ASSERT_TRUE(counter->wait_for_at_least(1, 2000ms));
@@ -276,12 +236,11 @@ TEST_F(CronSchedulerTest, ScheduleStop)
   std::this_thread::sleep_for(2000ms);
 
   EXPECT_EQ(counter->get_count(), count_after_stop)
-        << "Job continued running after stop() was called";
+      << "Job continued running after stop() was called";
 }
 
 // 测试 3: 验证延迟启动 (Delayed Start)
-TEST_F(CronSchedulerTest, ScheduleDelay)
-{
+TEST_F(CronSchedulerTest, ScheduleDelay) {
   auto counter = std::make_shared<AsyncCounter>();
 
   // 定义延迟时间：2秒
@@ -289,10 +248,7 @@ TEST_F(CronSchedulerTest, ScheduleDelay)
 
   // 调度：每秒执行一次，但先延迟 2 秒
   auto job = CronScheduler::instance().schedule(
-    "* * * * * *",
-    [counter]() { counter->tick(); },
-    delay_time
-  );
+      "* * * * * *", [counter]() { counter->tick(); }, delay_time);
 
   // 阶段 A: 验证在延迟期间（比如前 1 秒内），任务没有运行
   // Cron 是每秒一次，如果没有延迟，1秒内肯定会跑。
@@ -302,20 +258,21 @@ TEST_F(CronSchedulerTest, ScheduleDelay)
   // 阶段 B: 验证延迟结束后，任务开始运行
   // 现在已经过了 1s，再等 2.5s (总共 3.5s)，应该能覆盖 2s 延迟 + 1s 触发
   ASSERT_TRUE(counter->wait_for_at_least(1, 2500ms))
-        << "Job failed to start after delay";
+      << "Job failed to start after delay";
 
   job->stop();
 }
 
 // 测试 4: 多个任务并发
-TEST_F(CronSchedulerTest, MultipleTasks)
-{
+TEST_F(CronSchedulerTest, MultipleTasks) {
   auto counter1 = std::make_shared<AsyncCounter>();
   auto counter2 = std::make_shared<AsyncCounter>();
 
-  auto job1 = CronScheduler::instance().schedule("* * * * * *", [counter1]() { counter1->tick(); });
+  auto job1 = CronScheduler::instance().schedule(
+      "* * * * * *", [counter1]() { counter1->tick(); });
   // job2 延迟 1 秒开始
-  auto job2 = CronScheduler::instance().schedule("* * * * * *", [counter2]() { counter2->tick(); }, 1000ms);
+  auto job2 = CronScheduler::instance().schedule(
+      "* * * * * *", [counter2]() { counter2->tick(); }, 1000ms);
 
   // 验证 job1 跑了
   EXPECT_TRUE(counter1->wait_for_at_least(1, 2000ms));
@@ -328,17 +285,15 @@ TEST_F(CronSchedulerTest, MultipleTasks)
 }
 
 // 测试 5: 验证错误的表达式不会导致 Crash，而是抛出异常
-TEST_F(CronSchedulerTest, InvalidExpression)
-{
-  EXPECT_THROW({
-               CronScheduler::instance().schedule("invalid cron", [](){});
-               }, std::exception);
+TEST_F(CronSchedulerTest, InvalidExpression) {
+  EXPECT_THROW({ CronScheduler::instance().schedule("invalid cron", []() {}); },
+               std::exception);
 }
 
-TEST_F(CronSchedulerTest, UnscheduleStopsAndRemovesJob)
-{
+TEST_F(CronSchedulerTest, UnscheduleStopsAndRemovesJob) {
   auto counter = std::make_shared<AsyncCounter>();
-  auto job = CronScheduler::instance().schedule("* * * * * *", [counter]() { counter->tick(); });
+  auto job = CronScheduler::instance().schedule(
+      "* * * * * *", [counter]() { counter->tick(); });
 
   EXPECT_EQ(CronScheduler::instance().job_count(), 1u);
 
@@ -349,8 +304,7 @@ TEST_F(CronSchedulerTest, UnscheduleStopsAndRemovesJob)
   EXPECT_TRUE(counter->ensure_no_execution_for(1200ms));
 }
 
-TEST_F(CronSchedulerTest, PruneStoppedRemovesManuallyStoppedJobs)
-{
+TEST_F(CronSchedulerTest, PruneStoppedRemovesManuallyStoppedJobs) {
   auto job1 = CronScheduler::instance().schedule("* * * * * *", []() {});
   auto job2 = CronScheduler::instance().schedule("* * * * * *", []() {});
 
