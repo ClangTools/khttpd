@@ -477,14 +477,15 @@ TEST(HttpClientLocalTest, SyncRequestWithUnrunExternalIoContextTimesOut) {
   boost::asio::io_context ioc;
   HttpClient client(ioc);
   client.set_base_url("http://127.0.0.1:9");
-  client.set_timeout(std::chrono::seconds(0));
+  // Zero now means unlimited; use a positive bound for an unrun executor.
+  client.set_timeout(std::chrono::seconds(1));
 
   auto start = std::chrono::steady_clock::now();
   EXPECT_THROW(client.request_sync(http::verb::get, "/", {}, "", {}),
                boost::system::system_error);
   auto elapsed = std::chrono::steady_clock::now() - start;
 
-  EXPECT_LT(elapsed, std::chrono::seconds(2));
+  EXPECT_LT(elapsed, std::chrono::seconds(3));
 }
 
 TEST(HttpClientLocalTest, SyncRequestTimeoutClosesStalledConnection) {
@@ -952,4 +953,82 @@ TEST_F(ClientTest, MultiHostClientPool) {
   });
 
   WAIT_FOR_ASYNC(future);
+}
+
+// Local on-wire regressions for independent phase and unlimited deadlines.
+TEST(ClientTimeout, LegacyZeroDoesNotImmediatelyCancelSlowResponse) {
+  net::io_context io;
+  tcp::acceptor acceptor(io, {net::ip::make_address("127.0.0.1"), 0});
+  auto server = std::async(std::launch::async, [&] {
+    tcp::socket socket(io); acceptor.accept(socket);
+    boost::beast::flat_buffer buffer; http::request<http::string_body> request;
+    boost::system::error_code error;
+    http::read(socket, buffer, request, error);
+    if (error) return;
+    EXPECT_EQ(std::string(request.target()),"/status?channel=1");
+    std::this_thread::sleep_for(std::chrono::milliseconds(1200));
+    http::response<http::string_body> response{http::status::ok,11};
+    response.body()="ready"; response.prepare_payload();
+    http::write(socket, response, error);
+  });
+  khttpd::framework::client::HttpClient client;
+  client.set_base_url("http://127.0.0.1:" + std::to_string(acceptor.local_endpoint().port()));
+  client.set_timeout(std::chrono::seconds(0));
+  EXPECT_NO_THROW(EXPECT_EQ(client.request_sync(http::verb::get,"/status?channel=1",{},"",{}).body(),"ready"));
+  server.get();
+}
+
+static void slow_response(const ClientTimeouts& options, int phase) {
+  net::io_context io; tcp::acceptor acceptor(io,{net::ip::make_address("127.0.0.1"),0});
+  auto server=std::async(std::launch::async,[&] {
+    tcp::socket socket(io); acceptor.accept(socket);
+    boost::beast::flat_buffer buffer; http::request<http::string_body> request;
+    boost::system::error_code error; http::read(socket,buffer,request,error); if(error) return;
+    std::this_thread::sleep_for(std::chrono::milliseconds(1300));
+    http::response<http::string_body> response{http::status::ok,11}; response.body()="ready"; response.prepare_payload(); http::write(socket,response,error);
+  });
+  khttpd::framework::client::HttpClient client;
+  client.set_base_url("http://127.0.0.1:"+std::to_string(acceptor.local_endpoint().port())); client.set_timeouts(options);
+  if(phase == 0) EXPECT_EQ(client.request_sync(http::verb::get,"/",{},"",{}).body(),"ready");
+  else { try { client.request_sync(http::verb::get,"/",{},"",{}); FAIL()<<"timeout expected"; }
+    catch(const boost::system::system_error& error) {
+      EXPECT_EQ(std::string(error.code().category().name()), "http.client.timeout");
+      EXPECT_EQ(error.code().value(), phase);
+    } }
+  server.get();
+}
+TEST(ClientTimeout, ReadDeadlineNamesPhase) { slow_response({std::chrono::seconds(3),std::chrono::seconds(2),std::chrono::seconds(1),std::chrono::seconds(2)}, 3); }
+TEST(ClientTimeout, TotalDeadlineAppliesWithUnlimitedRead) { slow_response({std::chrono::seconds(1),std::chrono::seconds(2),std::chrono::seconds(0),std::chrono::seconds(2)}, 1); }
+TEST(ClientTimeout, UnlimitedTotalStillHonorsReadDeadline) { slow_response({std::chrono::seconds(0),std::chrono::seconds(2),std::chrono::seconds(1),std::chrono::seconds(2)}, 3); }
+TEST(ClientTimeout, ZeroReadWaitsWhenTotalAllowsIt) { slow_response({std::chrono::seconds(3),std::chrono::seconds(2),std::chrono::seconds(0),std::chrono::seconds(2)}, 0); }
+TEST(ClientTimeout, TlsHandshakeCoveredByConnectDeadline) {
+  net::io_context io; tcp::acceptor acceptor(io,{net::ip::make_address("127.0.0.1"),0});
+  auto server=std::async(std::launch::async,[&] { tcp::socket socket(io); acceptor.accept(socket); std::this_thread::sleep_for(std::chrono::milliseconds(1300)); });
+  khttpd::framework::client::HttpClient client;
+  client.set_base_url("https://127.0.0.1:"+std::to_string(acceptor.local_endpoint().port()));
+  client.set_timeouts({std::chrono::seconds(3),std::chrono::seconds(1),std::chrono::seconds(2),std::chrono::seconds(2)});
+  try {client.request_sync(http::verb::get,"/",{},"",{}); FAIL()<<"timeout expected";}
+  catch(const boost::system::system_error& error) {
+    EXPECT_EQ(std::string(error.code().category().name()), "http.client.timeout");
+    EXPECT_EQ(error.code().value(), 2);
+  } server.get();
+}
+TEST(ClientTimeout, StalledUploadCoveredByWriteDeadline) {
+  net::io_context io; tcp::acceptor acceptor(io,{net::ip::make_address("127.0.0.1"),0});
+  auto server=std::async(std::launch::async,[&] {tcp::socket socket(io); acceptor.accept(socket); socket.set_option(net::socket_base::receive_buffer_size(1024));
+    // Keep the peer alive past every client deadline. Closing at 1500ms makes
+    // Windows report a connection reset before the intended write/read timeout.
+    std::this_thread::sleep_for(std::chrono::milliseconds(4000)); });
+  khttpd::framework::client::HttpClient client;
+  client.set_base_url("http://127.0.0.1:"+std::to_string(acceptor.local_endpoint().port()));
+  client.set_timeouts({std::chrono::seconds(3),std::chrono::seconds(2),std::chrono::seconds(2),std::chrono::seconds(1)});
+  try {client.request_sync(http::verb::post,"/",{},std::string(16*1024*1024,'x'),{}); FAIL()<<"timeout expected";}
+  catch(const boost::system::system_error& error) {
+    EXPECT_EQ(std::string(error.code().category().name()), "http.client.timeout");
+    // Windows may complete the buffered upload before the write deadline and
+    // then time out while waiting for the response. Both phases are valid for
+    // this deliberately non-reading peer; the important contract is that the
+    // client returns a typed timeout instead of waiting indefinitely.
+    EXPECT_TRUE(error.code().value() == 3 || error.code().value() == 4);
+  } server.get();
 }

@@ -29,22 +29,44 @@ class Session : public std::enable_shared_from_this<Session> {
   http::request<http::string_body> req_;
   std::optional<http::response_parser<http::string_body>> response_parser_;
   beast::flat_buffer buffer_;
-  std::chrono::seconds timeout_;
+  ClientTimeouts timeouts_;
+  net::strand<net::io_context::executor_type> executor_;
+  net::steady_timer total_timer_, phase_timer_;
   std::atomic<bool> completed_{false};
 
  public:
-  Session(HttpClient::ResponseCallback callback, std::chrono::seconds timeout)
-      : callback_(std::move(callback)), timeout_(timeout) {}
+  Session(net::io_context& io, HttpClient::ResponseCallback callback, ClientTimeouts timeouts)
+      : callback_(std::move(callback)), timeouts_(timeouts), executor_(net::make_strand(io)),
+        total_timer_(executor_), phase_timer_(executor_) {}
 
   virtual ~Session() = default;
-  virtual void run(const std::string& host, const std::string& port,
-                   http::request<http::string_body> req) = 0;
+  void run(const std::string& host, const std::string& port, http::request<http::string_body> req) {
+    net::post(executor_, [self=shared_from_this(),host,port,req=std::move(req)]() mutable {
+      self->arm(self->total_timer_,self->timeouts_.total,1);
+      self->phase(self->timeouts_.connect,2);
+      self->start(host,port,std::move(req));
+    });
+  }
+  virtual void start(const std::string& host, const std::string& port,
+                     http::request<http::string_body> req) = 0;
   virtual void cancel() = 0;
 
  protected:
+  void arm(net::steady_timer& timer, std::chrono::seconds duration, int code) {
+    timer.cancel();
+    if (completed_.load() || duration.count()==0) return;
+    timer.expires_after(duration);
+    timer.async_wait([self=shared_from_this(),code](beast::error_code error) {
+      if (error || self->completed_.load()) return;
+      self->complete(client_timeout_error(code),{});
+      self->cancel();
+    });
+  }
+  void phase(std::chrono::seconds duration, int code) { arm(phase_timer_,duration,code); }
   void complete(beast::error_code ec, http::response<http::string_body> res) {
-    if (!completed_.exchange(true) && callback_) {
-      callback_(ec, std::move(res));
+    if (!completed_.exchange(true)) {
+      total_timer_.cancel(); phase_timer_.cancel();
+      if (callback_) callback_(ec, std::move(res));
     }
   }
 
@@ -69,15 +91,14 @@ class HttpSession : public Session {
 
  public:
   HttpSession(net::io_context& ioc, HttpClient::ResponseCallback cb,
-              std::chrono::seconds timeout)
-      : Session(std::move(cb), timeout),
-        stream_(net::make_strand(ioc)),
+              ClientTimeouts timeouts)
+      : Session(ioc, std::move(cb), timeouts),
+        stream_(executor_),
         resolver_(stream_.get_executor()) {}
 
-  void run(const std::string& host, const std::string& port,
+  void start(const std::string& host, const std::string& port,
            http::request<http::string_body> req) override {
     req_ = std::move(req);
-    stream_.expires_after(timeout_);
     resolver_.async_resolve(
         host, port,
         beast::bind_front_handler(&HttpSession::on_resolve, get_shared()));
@@ -94,16 +115,17 @@ class HttpSession : public Session {
   }
 
   void on_resolve(beast::error_code ec, tcp::resolver::results_type results) {
+    if (completed_.load()) return;
     if (ec) return on_fail(ec, "resolve");
-    stream_.expires_after(timeout_);
     stream_.async_connect(results, beast::bind_front_handler(
                                        &HttpSession::on_connect, get_shared()));
   }
 
   void on_connect(beast::error_code ec,
                   tcp::resolver::results_type::endpoint_type) {
+    if (completed_.load()) return;
     if (ec) return on_fail(ec, "connect");
-    stream_.expires_after(timeout_);
+    phase(timeouts_.write,4);
     http::async_write(
         stream_, req_,
         beast::bind_front_handler(&HttpSession::on_write, get_shared()));
@@ -111,12 +133,15 @@ class HttpSession : public Session {
 
   void on_write(beast::error_code ec, std::size_t bytes_transferred) {
     boost::ignore_unused(bytes_transferred);
+    if (completed_.load()) return;
     if (ec) return on_fail(ec, "write");
+    phase(timeouts_.read,3);
 
     read_response();
   }
 
   void read_response() {
+    if (completed_.load()) return;
     response_parser_.emplace();
     response_parser_->body_limit((std::numeric_limits<std::uint64_t>::max)());
     response_parser_->skip(req_.method() == http::verb::head);
@@ -152,12 +177,12 @@ class HttpsSession : public Session {
 
  public:
   HttpsSession(net::io_context& ioc, ssl::context& ctx,
-               HttpClient::ResponseCallback cb, std::chrono::seconds timeout)
-      : Session(std::move(cb), timeout),
-        stream_(net::make_strand(ioc), ctx),
+               HttpClient::ResponseCallback cb, ClientTimeouts timeouts)
+      : Session(ioc, std::move(cb), timeouts),
+        stream_(executor_, ctx),
         resolver_(stream_.get_executor()) {}
 
-  void run(const std::string& host, const std::string& port,
+  void start(const std::string& host, const std::string& port,
            http::request<http::string_body> req) override {
     req_ = std::move(req);
     if (!SSL_set_tlsext_host_name(stream_.native_handle(), host.c_str())) {
@@ -167,7 +192,6 @@ class HttpsSession : public Session {
     }
     stream_.set_verify_callback(ssl::host_name_verification(host));
 
-    stream_.next_layer().expires_after(timeout_);
     resolver_.async_resolve(
         host, port,
         beast::bind_front_handler(&HttpsSession::on_resolve, get_shared()));
@@ -186,8 +210,8 @@ class HttpsSession : public Session {
   }
 
   void on_resolve(beast::error_code ec, tcp::resolver::results_type results) {
+    if (completed_.load()) return;
     if (ec) return on_fail(ec, "resolve");
-    stream_.next_layer().expires_after(timeout_);
     beast::get_lowest_layer(stream_).async_connect(
         results,
         beast::bind_front_handler(&HttpsSession::on_connect, get_shared()));
@@ -195,16 +219,17 @@ class HttpsSession : public Session {
 
   void on_connect(beast::error_code ec,
                   tcp::resolver::results_type::endpoint_type) {
+    if (completed_.load()) return;
     if (ec) return on_fail(ec, "connect");
-    stream_.next_layer().expires_after(timeout_);
     stream_.async_handshake(
         ssl::stream_base::client,
         beast::bind_front_handler(&HttpsSession::on_handshake, get_shared()));
   }
 
   void on_handshake(beast::error_code ec) {
+    if (completed_.load()) return;
     if (ec) return on_fail(ec, "handshake");
-    stream_.next_layer().expires_after(timeout_);
+    phase(timeouts_.write,4);
     http::async_write(
         stream_, req_,
         beast::bind_front_handler(&HttpsSession::on_write, get_shared()));
@@ -212,11 +237,14 @@ class HttpsSession : public Session {
 
   void on_write(beast::error_code ec, std::size_t bytes_transferred) {
     boost::ignore_unused(bytes_transferred);
+    if (completed_.load()) return;
     if (ec) return on_fail(ec, "write");
+    phase(timeouts_.read,3);
     read_response();
   }
 
   void read_response() {
+    if (completed_.load()) return;
     response_parser_.emplace();
     response_parser_->body_limit((std::numeric_limits<std::uint64_t>::max)());
     response_parser_->skip(req_.method() == http::verb::head);
@@ -320,7 +348,11 @@ void HttpClient::set_bearer_token(const std::string& token) {
 }
 
 void HttpClient::set_timeout(std::chrono::seconds seconds) {
-  timeout_ = seconds;
+  set_timeouts({seconds,seconds,seconds,seconds});
+}
+void HttpClient::set_timeouts(ClientTimeouts timeouts) {
+  validate_client_timeouts(timeouts);
+  timeouts_ = timeouts;
 }
 
 HttpClient::UrlParts HttpClient::parse_target(
@@ -421,10 +453,10 @@ void HttpClient::request(http::verb method, std::string path,
         return;
       }
       session = std::make_shared<HttpsSession>(ioc_, *ssl_ctx_ptr_,
-                                               std::move(callback), timeout_);
+                                               std::move(callback), timeouts_);
     } else {
       session =
-          std::make_shared<HttpSession>(ioc_, std::move(callback), timeout_);
+          std::make_shared<HttpSession>(ioc_, std::move(callback), timeouts_);
     }
     session->run(parts.host, parts.port, std::move(req));
   } catch (const std::exception& e) {
@@ -474,10 +506,10 @@ http::response<http::string_body> HttpClient::request_sync(
             beast::errc::operation_not_supported, beast::system_category()));
       }
       session = std::make_shared<HttpsSession>(ioc_, *ssl_ctx_ptr_,
-                                               std::move(callback), timeout_);
+                                               std::move(callback), timeouts_);
     } else {
       session =
-          std::make_shared<HttpSession>(ioc_, std::move(callback), timeout_);
+          std::make_shared<HttpSession>(ioc_, std::move(callback), timeouts_);
     }
     session->run(parts.host, parts.port, std::move(req));
   } catch (const boost::system::system_error&) {
@@ -487,12 +519,13 @@ http::response<http::string_body> HttpClient::request_sync(
         beast::errc::invalid_argument, beast::system_category()));
   }
 
-  if (f.wait_for(timeout_ + std::chrono::seconds(1)) !=
+  if (timeouts_.total.count() > 0 &&
+      f.wait_for(timeouts_.total + std::chrono::seconds(1)) !=
       std::future_status::ready) {
     completed->store(true);
     if (session) session->cancel();
     throw boost::system::system_error(
-        beast::error_code(beast::errc::timed_out, beast::system_category()));
+        client_timeout_error(1));
   }
   auto result = f.get();
 
