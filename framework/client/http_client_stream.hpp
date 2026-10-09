@@ -34,6 +34,8 @@ class HttpClientStream : public std::enable_shared_from_this<HttpClientStream> {
   void async_read_some(boost::asio::mutable_buffer buffer,
                        ReadCallback callback);
   void cancel();
+  // Set before async_start; called on the stream executor before sending the head.
+  void set_start_write_callback(std::function<void()> callback);
 
  private:
   struct Impl;

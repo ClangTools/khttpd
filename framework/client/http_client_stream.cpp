@@ -44,6 +44,7 @@ struct HttpClientStream::Impl
   http::verb request_method = http::verb::unknown;
   std::string host;
   std::string port;
+  std::function<void()> start_write_callback;
   bool use_tls = false;
   bool started = false;
   bool request_finished = false;
@@ -137,6 +138,7 @@ struct HttpClientStream::Impl
 
   template <class Stream>
   void async_write_header(Stream& stream, Callback callback) {
+    if (start_write_callback) start_write_callback();
     http::async_write_header(
         stream, *request_serializer,
         [self = shared_from_this(), callback = std::move(callback)](
@@ -321,4 +323,7 @@ void HttpClientStream::async_read_some(net::mutable_buffer buffer,
   impl_->read(buffer, std::move(cb));
 }
 void HttpClientStream::cancel() { impl_->cancel(); }
+void HttpClientStream::set_start_write_callback(std::function<void()> callback) {
+  impl_->start_write_callback=std::move(callback);
+}
 }  // namespace khttpd::framework::client

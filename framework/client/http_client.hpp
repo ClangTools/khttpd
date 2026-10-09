@@ -11,6 +11,7 @@
 #include <boost/json.hpp>
 #include <boost/url.hpp>
 #include <functional>
+#include "client_timeouts.hpp"
 #include <future>
 #include <map>
 #include <memory>
@@ -92,6 +93,7 @@ class HttpClient : public std::enable_shared_from_this<HttpClient> {
   void set_default_header(const std::string& key, const std::string& value);
   void set_bearer_token(const std::string& token);
   void set_timeout(std::chrono::seconds seconds);
+  void set_timeouts(ClientTimeouts timeouts);
 
   // Core Request Method (Used by Macros)
   void request(http::verb method,
@@ -130,7 +132,7 @@ class HttpClient : public std::enable_shared_from_this<HttpClient> {
   std::unique_ptr<HostPool>
       host_pool_;  // Multi-host support (null if single host)
   std::map<std::string, std::string> default_headers_;
-  std::chrono::seconds timeout_{30};
+  ClientTimeouts timeouts_;
 };
 }  // namespace khttpd::framework::client
 

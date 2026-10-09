@@ -311,3 +311,9 @@ private:
 ws->set_header("Authorization", "Bearer token123");
 ws->connect("wss://api.example.com/ws", ...);
 ```
+
+### HTTP request deadlines
+
+`set_timeouts(ClientTimeouts{total, connect, read, write})` configures independent whole-request, DNS/TCP/TLS connection, response-read, and request-write deadlines. Values use `std::chrono::seconds`; zero disables the corresponding deadline. The earliest applicable deadline cancels the request with category `http.client.timeout` (1 total, 2 connect, 3 read, 4 write). The total deadline does not reset when data is transferred. `set_timeout(seconds)` applies the same limit to all four fields, including zero as unlimited. Stream reads and writes apply their corresponding phase limit to each operation.
+
+On-wire regression coverage is in `framework/tests/client_test.cpp`: delayed response with read/total limits, zero read/total, stalled TLS handshake, and a stalled upload. Gateway and provider-specific tests cover their streaming and proxy policies separately.
