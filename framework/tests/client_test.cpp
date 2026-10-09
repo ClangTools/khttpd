@@ -1015,7 +1015,10 @@ TEST(ClientTimeout, TlsHandshakeCoveredByConnectDeadline) {
 }
 TEST(ClientTimeout, StalledUploadCoveredByWriteDeadline) {
   net::io_context io; tcp::acceptor acceptor(io,{net::ip::make_address("127.0.0.1"),0});
-  auto server=std::async(std::launch::async,[&] {tcp::socket socket(io); acceptor.accept(socket); socket.set_option(net::socket_base::receive_buffer_size(1024)); std::this_thread::sleep_for(std::chrono::milliseconds(1500)); });
+  auto server=std::async(std::launch::async,[&] {tcp::socket socket(io); acceptor.accept(socket); socket.set_option(net::socket_base::receive_buffer_size(1024));
+    // Keep the peer alive past every client deadline. Closing at 1500ms makes
+    // Windows report a connection reset before the intended write/read timeout.
+    std::this_thread::sleep_for(std::chrono::milliseconds(4000)); });
   khttpd::framework::client::HttpClient client;
   client.set_base_url("http://127.0.0.1:"+std::to_string(acceptor.local_endpoint().port()));
   client.set_timeouts({std::chrono::seconds(3),std::chrono::seconds(2),std::chrono::seconds(2),std::chrono::seconds(1)});
