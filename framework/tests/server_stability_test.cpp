@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "framework/context/http_context.hpp"
+#include "framework/io_context_pool.hpp"
 #include "framework/server.hpp"
 
 namespace beast = boost::beast;
@@ -111,6 +112,10 @@ TEST(ServerStabilityTest, HandlesManyConcurrentRequests) {
   if (server_thread.joinable()) {
     server_thread.join();
   }
+
+  // Server::run() must not return while the process-wide pool still has
+  // workers executing handlers that reference the server and its routers.
+  EXPECT_EQ(khttpd_fw::IoContextPool::instance().get_thread_count(), 0U);
 
   constexpr int total_requests = kThreadCount * kRequestsPerThread;
   EXPECT_EQ(successes.load(), total_requests);
