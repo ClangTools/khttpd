@@ -107,6 +107,12 @@ void Server::run() {
 
   IoContextPool::instance().get_io_context().run();
 
+  // stop() only signals the pool so it can be called from an Asio worker
+  // without joining itself.  The run() caller is the owner of the Server
+  // lifetime, so wait for every worker before returning and allowing Server's
+  // handlers, routers, and acceptor to be destroyed.
+  IoContextPool::instance().shutdown();
+
   spdlog::info("Server workers stopped.");
 }
 

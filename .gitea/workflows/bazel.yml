@@ -60,13 +60,13 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          bazel test //framework/... --test_output=errors --test_verbose_timeout_warnings 2>&1 | tee ci-test.log
+          bazel test -c opt --strip=always //framework/... --test_output=errors --test_verbose_timeout_warnings 2>&1 | tee ci-test.log
       - name: HTTP concurrency benchmark smoke test
         id: concurrency_benchmark
         shell: bash
         run: |
           set -o pipefail
-          bazel run //framework/tests:concurrency_benchmark -- \
+          bazel run -c opt --strip=always //framework/tests:concurrency_benchmark -- \
             --server-threads 2 --concurrency 8 --requests 80 --warmup 8 \
             2>&1 | tee ci-concurrency-benchmark.log
       - name: Publish test and benchmark summary
@@ -138,5 +138,5 @@ jobs:
         run: |
           cp .bazelrc ./example
           cd example
-          bazel build app
+          bazel build -c opt --strip=always app
           cd ..
